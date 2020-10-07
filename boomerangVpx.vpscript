@@ -1,0 +1,3069 @@
+'****************************************************************
+'
+'					Boomerang (Bally 1974)
+'					 Script by Scottacus
+'							V 1.1
+'					     September 2020
+'
+'		DOF config
+'		101 Left Flipper, 102 Right Flipper
+'		103 Left sling, 104 Right sling
+'		405 Bumper
+'		406-407 Special Targets L/R
+'		408-409 Center Targets L/R
+'		410-413 Top Side Lane Rollovers L/R
+'		414-415 Targets Mid L/R
+'		416 Spinner
+'		417-420 Mid L/R
+'		421-422 Out Lanes L/R
+'		423-424 In Lanes L/R
+'		425 Top Kicker
+'		426 Drain, 425 Ball Release
+'	 	427 Cedit Light
+'		428 Knocker
+'		429 Knocker and Kicker Strobe
+'		450 Ball In Shooter Lane
+'		441 Chime1-10s, 442 Chime2-100s, 443 Chime3-1000s
+'
+'		Code Flow
+'									 EndGame
+'										^
+'		Start Game -> New Game -> Check Continue -> Release Ball -> Drain -> Score Bouns -> Advance Player -> Next Ball
+'										^																		  |
+'									EndGame = True <---------------------------------------------------------------
+
+'	Ball Control Subroutine developed by: rothbauerw
+'		Press "c" during play to activate, the arrow keys control the ball
+'**********************************************************************************************************************
+
+Option Explicit
+Randomize
+
+On Error Resume Next
+ExecuteGlobal GetTextFile("controller.vbs")
+If Err Then MsgBox "Can't open controller.vbs"
+On Error Goto 0
+
+Const cGameName = "Boomerang_1974"
+Const cOptions = "Boomerang_1974.txt"
+Const HSFileName="Boomerang (Bally 1974)"
+
+'***************************************************************************************
+'Set this variable to 1 to save a PinballY High Score file to your Tables Folder
+'this will let the Pinball Y front end display the high scores when searching for tables
+'0 = No PinballY High Scores, 1 = Save PinballY High Scores
+Const cPinballY = 2
+'***************************************************************************************
+
+Dim Balls
+Dim Replays
+Dim Add1, Add10, Add100, Add1000
+Dim MaxPlayers
+Dim Players
+Dim Player
+Dim Credit
+Dim Score(6)
+Dim HScore(6)
+Dim SReel(6)
+Dim State
+Dim Tilt
+Dim TiltSens
+Dim Target(9)
+Dim BallinPlay
+Dim MatchNumber
+Dim EndGame
+Dim Bell
+Dim i,j, f, ii, Object, Light, x, y, z
+Dim AwardCheck
+Dim BStop
+Dim FreePlay
+Dim BallInLane
+Dim Ballsize,BallMass
+Dim BallHomeCheck
+Dim Launched
+Dim BellRing
+BallSize = 50
+BallMass = (Ballsize^3)/125000
+Dim BIP : BIP = 0
+Dim Options
+Dim HSUx
+Dim ReplayEB
+Dim Chime
+Dim BonusScore
+Dim Points
+Dim PFOption
+
+Sub Table1_init
+	LoadEM
+	MaxPlayers=4
+
+	For x = 1 to maxPlayers
+		Set sReel(x) = EVAL("scoreReel" & x)
+	Next
+
+	Rotate = .4
+	UpDown = 0
+	Player=1
+	LoadHighScore
+
+	If ReplayEB = 0 Then
+		Replay(1) = 136000
+		Replay(2) = 185000
+		Replay(3) = 100000000
+	End If
+	If ReplayEB = 1 Then
+		If Balls = 3 Then
+			Replay(1) = 86000
+			Replay(2) = 97000
+			Replay(3) = 105000
+		Else
+			Replay(1) = 140000
+			Replay(2) = 156000
+			Replay(3) = 174000
+		End If
+	End If
+	If HighScore(0) = "" Then HighScore(0)=50000
+	If HighScore(1) = "" Then HighScore(1)=45000
+	If HighScore(2) = "" Then HighScore(2)=40000
+	If HighScore(3) = "" Then HighScore(3)=35000
+	If HighScore(4) = "" Then HighScore(4)=30000
+	If MatchNumber = "" Then MatchNumber = 4
+	If ShowDT = True Then PFOption = 1
+	If PFOption = "" Then PFOption = 1
+	If Initial(0,1) = "" Then
+		Initial(0,1) = 19: Initial(0,2) = 5: Initial(0,3) = 13
+		Initial(1,1) = 1: Initial(1,2) = 1: Initial(1,3) = 1
+		Initial(2,1) = 2: Initial(2,2) = 2: Initial(2,3) = 2
+		Initial(3,1) = 3: Initial(3,2) = 3: Initial(3,3) = 3
+		Initial(4,1) = 4: Initial(4,2) = 4: Initial(4,3) = 4
+	End If
+	If Credit = "" Then Credit = 0
+	If FreePlay = "" Then FreePlay = 1
+	If Balls = "" Then Balls = 5
+	If ReplayEB = "" Then ReplayEB = 1
+	If Chime ="" Then Chime = 0
+
+	For x = 1 to 4
+		ReelDone(x) = 1
+	Next
+
+	FirstBallOut = 0
+	UpdatePostIt
+	DynamicUpdatePostIt.enabled = 1
+	TiltTxt.text="TILT"
+	CreditReel.setvalue(Credit)
+	If Credit > 0 Then
+			CreditRamp.visible = True: CreditLight.state = True
+	End If
+
+	If ShowDT = True Then
+		For each object in backdropstuff
+		Object.visible = 1
+		Next
+	End If
+
+	If ShowDt = False Then
+		For each object in backdropstuff
+		Object.visible = 0
+		Next
+	End If
+
+	Matchtxt.text = MatchNumber * 10
+
+	Tilt = False
+	State = False
+	GameState
+	If FreePlay = 0 Then
+		CoinCard.image = "Card" & Balls & "BallsCoin"
+	Else
+		CoinCard.image = "Card" & Balls & "BallsFree"
+	End If
+
+	If ReplayEB = 1 Then
+		InstructCard.image = "InstructReplay" & Balls
+	Else
+		InstructCard.image = "InstructEB"
+	End If
+
+'***********Trough Ball Creation
+	Drain.CreateSizedBallWithMass Ballsize/2, BallMass
+	Kicker1.CreateSizedBallWithMass Ballsize/2, BallMass
+	Kicker1.kick 0, 0
+	Kicker2.CreateSizedBallWithMass Ballsize/2, BallMass
+	Kicker2.kick 0, 0
+End Sub
+
+Dim Rotate, UpDown
+
+'***********KeyCodes
+Dim EnableInitialEntry, firstBallOut
+Sub Table1_KeyDown(ByVal keycode)
+
+	If EnableInitialEntry = True Then EnterIntitals(keycode)
+
+	If keycode = AddCreditKey Then
+		PlayFieldSound "coinin",0,Drain,1
+		AddCredit = 1
+		ScoreMotor5.enabled = 1
+    End If
+
+    If keycode = StartGameKey Then
+		If EnableInitialEntry = False and operatormenu = 0 and backGlassOn = 1 Then
+			If FreePlay = 1 and Players < 4 and FirstBallOut = 0 Then StartGame
+			If FreePlay = 0 and Credit > 0 and Players < 4 and FirstBallOut = 0 Then
+				Credit = Credit - 1
+				Playsound "Reel"
+				CreditReel.setvalue(Credit)
+				If B2SOn Then
+					If Freeplay = 0 Then Controller.B2SSetCredits Credit
+					If FreePlay = 0 and Credit < 1 Then DOF 427, DOFOff
+				End If
+				If Credit < 1 Then
+					CreditRamp.visible = 0: CreditLight.state = 0
+				End If
+				StartGame
+			End If
+		End If
+	End If
+
+	If keycode = PlungerKey Then
+		Plunger.PullBack
+		PlayFieldSound "plungerpull", 0, Plunger, 1
+	End If
+
+  If Tilt = False and State = True Then
+	If keycode = LeftFlipperKey and contball = 0 Then
+		LFPress = 1
+		lf.fire
+		PlayFieldSound "FlipUpL", 0, LeftFlipper, 1
+		If B2SOn Then DOF 101,DOFOn
+		PlayFieldSound "FlipBuzzL", -1, LeftFlipper, 1
+	End If
+
+	If keycode = RightFlipperKey and contball = 0 Then
+		RFPress = 1
+		rf.fire
+		PlayFieldSound "FlipUpR", 0, RightFlipper,1
+		If B2SOn Then DOF 102,DOFOn
+		PlayFieldSound "FlipBuzzR", -1, RightFlipper,1
+	End If
+
+	If keycode = LeftTiltKey Then
+		Nudge 90, 2
+		CheckTilt
+	End If
+
+	If keycode = RightTiltKey Then
+		Nudge 270, 2
+		CheckTilt
+	End If
+
+	If keycode = CenterTiltKey Then
+		Nudge 0, 2
+		CheckTilt
+	End If
+  End If
+
+    If keycode = LeftFlipperKey and State = False and OperatorMenu = 0 and EnableInitialEntry = 0 Then
+        OperatorMenuTimer.Enabled = true
+    end if
+
+    If keycode = LeftFlipperKey and State = False and OperatorMenu = 1 Then
+		Options = Options + 1
+		If ShowDt = True Then If Options = 3 Then Options = 5
+        If Options = 6 then Options = 0
+		OptionMenu.visible = true
+        PlayFieldSound "target", 0, Bonus1, 1.5
+        Select Case (Options)
+            Case 0:
+                OptionMenu.image = "FreeCoin" & FreePlay
+            Case 1:
+                OptionMenu.image = Balls & "Balls"
+			Case 2:
+				OptionMenu.image = "ReplayEB" & ReplayEB
+ 			Case 3:
+				OptionMenu1.visible = 1
+				OptionMenu1.image = "DOF"
+				OptionMenu.image = "Chime" & Chime
+			Case 4:
+				OptionMenu.image = "UnderCab"
+				OptionMenu1.visible = 1
+				OptionMenu1.image = "Sound" & PFOption
+				OptionMenu2.visible = 1
+				OptionMenu2.image = "SoundChange"
+				Select Case (PFOption)
+					Case 1: Speaker1.visible = 1: Speaker2.visible = 1: Speaker3.visible = 0: Speaker4.visible = 0
+					Case 2: Speaker5.visible = 1: Speaker6.visible = 1: Speaker1.visible = 0: Speaker2.visible = 0
+					Case 3: Speaker1.visible = 1: Speaker2.visible = 1: Speaker3.visible = 1: Speaker4.visible = 1: Speaker5.visible = 0: Speaker6.visible = 0
+				End Select
+
+			Case 5:
+				For x = 1 to 6
+					EVAL("Speaker" & x).visible = 0
+				Next
+				OptionMenu1.visible = 0
+				OptionMenu.image = "SaveExit"
+				OptionMenu2.visible = 0
+        End Select
+    End If
+
+    If keycode = RightFlipperKey and State = False and OperatorMenu = 1 Then
+        PlayFieldSound "metalhit2", 0, Bonus1, 1.5
+      Select Case (Options)
+		Case 0:
+            If FreePlay = 0 Then
+                FreePlay = 1
+              Else
+                FreePlay = 0
+            End If
+            OptionMenu.image= "FreeCoin" & FreePlay
+				If FreePlay = 0 Then
+					CoinCard.image = "Card" & Balls & "BallsCoin"
+				Else
+			CoinCard.image = "Card" & Balls & "BallsFree"
+			End If
+			If FreePlay = 0 Then
+				If Credit > 0 and B2SOn Then DOF 427, DOFOn
+				If Credit < 1 and B2SOn Then DOF 427, DOFOff
+				If Credit > 0 Then
+					CreditRamp.visible = True: CreditLight.state = True
+				Else
+					CreditRamp.visible = 0: CreditLight.state = 0
+				End If
+			Else
+				If B2SOn Then DOF 427, DOFOn
+				CreditRamp.visible = 0: CreditLight.state = 0
+			End If
+        Case 1:
+            If Balls = 3 Then
+                Balls = 5
+              Else
+                Balls = 3
+            End If
+            OptionMenu.image = Balls & "Balls"
+			If FreePlay = 0 Then
+				CoinCard.image = "Card" & Balls & "BallsCoin"
+			Else
+				CoinCard.image = "Card" & Balls & "BallsFree"
+			End If
+			If ReplayEB = 1 Then InstructCard.image = "InstructReplay" & Balls
+        Case 2:
+			If ReplayEB = 0 Then
+				ReplayEB = 1
+				InstructCard.image = "InstructReplay" & Balls
+			Else
+				ReplayEB = 0
+				InstructCard.image = "InstructEB"
+			End If
+			OptionMenu.image = "ReplayEB" & ReplayEB
+		Case 3:
+            If Chime = 0 Then
+                Chime= 1
+				If B2SOn Then DOF 442,DOFPulse
+              Else
+                Chime = 0
+				PlayFieldsound "Chime10", 0, SoundPoint13, 1
+            End If
+			OptionMenu.image = "Chime" & Chime
+		Case 4:
+			OptionMenu1.visible = 1
+			PFOption = PFOption + 1
+			If PFOption = 4 Then PFOption = 1
+			OptionMenu1.image = "Sound" & PFOption
+
+			Select Case (PFOption)
+				Case 1: Speaker1.visible = 1: Speaker2.visible = 1: Speaker3.visible = 0: Speaker4.visible = 0
+				Case 2: Speaker5.visible = 1: Speaker6.visible = 1: Speaker1.visible = 0: Speaker2.visible = 0
+				Case 3: Speaker1.visible = 1: Speaker2.visible = 1: Speaker3.visible = 1: Speaker4.visible = 1: Speaker5.visible = 0: Speaker6.visible = 0
+			End Select
+        Case 5:
+            OperatorMenu = 0
+            saveHighScore
+			DynamicUpdatePostIt.enabled = 1
+			OptionMenu.image = "FreeCoin" & FreePlay
+            OptionMenu1.visible = 0
+			OptionMenu.visible = 0
+			OptionsMenu.visible = 0
+			If ReplayEB = 0 Then
+				Replay(1) = 136000
+				Replay(2) = 185000
+				Replay(3) = 100000000
+			End If
+			If ReplayEB = 1 Then
+				If Balls = 3 Then
+					Replay(1) = 86000
+					Replay(2) = 97000
+					Replay(3) = 105000
+				Else
+					Replay(1) = 140000
+					Replay(2) = 156000
+					Replay(3) = 174000
+				End If
+			End If
+		End Select
+      PlayFieldSound "metalhit2", 0, Bonus1, 1.5
+    End If
+
+	If Keycode = MechanicalTilt Then
+		Tilt = True
+		Tilttxt.text = "TILT"
+		If B2SOn Then Controller.B2SSetTilt 1
+		TurnOff
+	End If
+
+    If keycode = 46 Then' C Key
+        If contball = 1 Then
+            contball = 0
+          Else
+            contball = 1
+        End If
+    End If
+
+    If keycode = 48 Then 'B Key
+        If bcboost = 1 Then
+            bcboost = bcboostmulti
+          Else
+            bcboost = 1
+        End If
+    End If
+
+    If keycode = 203 Then Cleft = 1' Left Arrow
+
+    If keycode = 200 Then Cup = 1' Up Arrow
+
+    If keycode = 208 Then Cdown = 1' Down Arrow
+
+    If keycode = 205 Then Cright = 1' Right Arrow
+
+    If keycode = 52 Then Zup = 1' Period
+
+'************************Start Of Test Keys****************************
+'	If keycode = 30 Then  '"a"
+'		TestFlag = 1
+'		ResetReel.enabled = 1
+'		ResetLoop = 0
+'	End If
+'
+'	If Keycode = 31 Then  '"s"
+'		For x = 1 to 4
+'			Score(x) = Int(rnd(1)*10000)
+'			Score(x) = Score(x) * 10
+'			SReels(x).setvalue(Score(x))
+'			If B2SOn Then Controller.B2SSetScorePlayer x, Score(x)
+'		Next
+'	End If
+'
+'	If keycode = 33 Then  '"f"
+'		BallinPlay = 3
+'	End If
+'************************End Of Test Keys****************************
+End Sub
+
+
+Sub Table1_KeyUp(ByVal keycode)
+
+	If keycode = PlungerKey Then
+		Plunger.Fire
+		PlayFieldSound "PlungerFire", 0, Plunger, 1
+	End If
+
+    If keycode = LeftFlipperKey Then
+        OperatorMenuTimer.Enabled = False
+    End If
+
+   If Tilt = False and State = True Then
+		If keycode = LeftFlipperKey and contball = 0 Then
+			lfPress = 0
+			LeftFlipper.eosTorqueAngle = EOSA
+			LeftFlipper.eosTorque = EOST
+			LeftFlipper.RotateToStart
+			PlayFieldSound "FlipDownL", 0, LeftFlipper, 1
+			If B2SOn Then DOF 101,DOFOff
+			StopSound "FlipBuzzLA"
+			StopSound "FlipBuzzLB"
+			StopSound "FlipBuzzLC"
+			StopSound "FlipBuzzLD"
+		End If
+
+		If keycode = RightFlipperKey and contball = 0 Then
+			rfpress = 0
+			RightFlipper.eosTorqueAngle = EOSA
+			RightFlipper.eosTorque = EOST
+			RightFlipper.RotateToStart
+			PlayFieldSound "FlipDownR", 0, RightFlipper, 1
+			If B2SOn Then DOF 102,DOFOff
+			StopSound "FlipBuzzRA"
+			StopSound "FlipBuzzRB"
+			StopSound "FlipBuzzRC"
+			StopSound "FlipBuzzRD"
+		End If
+   End If
+
+    If keycode = 203 then Cleft = 0' Left Arrow
+
+    If keycode = 200 then Cup = 0' Up Arrow
+
+    If keycode = 208 then Cdown = 0' Down Arrow
+
+    If keycode = 205 then Cright = 0' Right Arrow
+
+    If keycode = 52 Then Zup = 0' Period
+
+End Sub
+
+'************** Table Boot
+Dim backGlassOn
+Dim bootCount:bootCount = 0
+Sub bootTable_Timer
+	bootCount = bootCount + 1
+
+	If bootCount = 1 Then
+		For each Light in GIlights:light.state = 0:Next
+		If B2SOn Then
+			Controller.B2SSetCredits Credit
+			Controller.B2SSetMatch 34, MatchNumber
+			Controller.B2SSetGameOver 35,1
+			Controller.B2SSetTilt 33,1
+			Controller.B2SSetBallInPlay 32,0
+			Controller.B2SSetPlayerUp 30,0
+			If Credit > 0 Then DOF 427, DOFOn
+			If FreePlay = 1 Then DOF 427, DOFOn
+		End If
+
+		For x = 1 to maxPlayers
+			If B2SOn Then controller.B2SSetScorePlayer x, score(x)
+			sReel(x).setvalue(score(x))
+		Next
+		StarAB.state = 1
+		StarCD.state = 1
+		BonusA.state = 1
+		BonusB.state = 1
+		BonusC.state = 1
+		BonusD.state = 1
+		Bonus1.state = 1
+		Star10001.state = 1
+		Star10002.state = 1
+		BonusScore = 1
+		For x = 2 to 10
+			Eval("Light" & x).state = 0
+		Next
+		Ring = 1
+		Light1.state = 1
+		BumperLight1.state = 1
+		Bumper1.hashitevent = 1
+		Pup1.state = 1
+		For each Light in GIlights:Light.state = 1: Next
+		shadows.visible = 1
+		shadowsoff.visible = 0
+		outers.image = "outerson"
+		toparch.image = "topapronon"
+		gatebracket.image = "gatebracketon"
+		backGlassOn = 1
+		me.enabled = False
+	End If
+End Sub
+
+'***********Operator Menu
+Dim operatormenu
+Sub OperatorMenuTimer_Timer
+    If optionMenu.visible = False Then playFieldSound "target", 0, SoundPointScoreMotor, 1.5
+	Options = 0
+    OperatorMenu = 1
+	DynamicUpdatePostIt.enabled = 0
+	UpdatePostIt
+	Options = 0
+    OptionsMenu.visible = True
+    OptionMenu.visible = True
+	OptionMenu.image = "FreeCoin" & FreePlay
+End Sub
+
+'***********Start Game
+Sub StartGame
+	If State = False Then
+		BallinPlay = 1
+		If B2SOn Then
+			If Freeplay = 0 Then Controller.B2SSetCredits Credit
+			Controller.B2SSetBallinPlay 32, BallinPlay
+			Controller.B2SSetPlayerup 30, 1
+			Controller.B2SSetCanPlay 31, 1
+			Controller.B2SSetGameOver 0
+			For x = 25 to 28
+				Controller.B2SSetData x, 0
+			Next
+		End If
+		DynamicUpdatePostIt.enabled = 0
+		UpdatePostIt
+		Tilt = False
+		State = True
+		GameState
+		Players = 1
+		EVAL("CanPlay" & Players).state = 1
+		For x = 1 to 4
+			Score(x) = (Score(x) mod 100000)
+		Next
+		NewGame
+	Else If State = True and Players < MaxPlayers and BallinPlay = 1 Then
+		Players = Players + 1
+		EVAL("CanPlay" & Players - 1).state = 0
+		EVAL("CanPlay" & Players).state = 1
+		CreditReel.setvalue(Credit)
+			If B2SOn Then
+				Controller.B2SSetCredits Credit
+				Controller.B2SSetCanplay 31, Players
+			End If
+		End If
+	End If
+End Sub
+
+'*********New Game
+Sub NewGame
+	Player = 1
+    EndGame = 0
+	If B2SOn Then controller.B2SSetShootAgain 36,0
+	GameState
+'	StarAB.state = 1
+'	StarCD.state = 1
+'	BonusA.state = 1
+'	BonusB.state = 1
+'	BonusC.state = 1
+'	BonusD.state = 1
+'	Bonus1.state = 1
+'	Star10001.state = 1
+'	Star10002.state = 1
+	BonusScore = 1
+	For x = 2 to 10
+		Eval("Light" & x).state = 0
+	Next
+	Ring = 1
+	Light1.state = 1
+	BumperLight1.state = 1
+	Bumper1.hashitevent = 1
+	Pup1.state = 1
+	ResetLights
+	ResetReel.enabled = True
+End Sub
+
+'**********Check if Game Should Continue
+Dim RelBall, Rep(4)
+Sub CheckContinue
+	If EndGame = 1 Then
+		TurnOff
+		StopSound "FlipBuzzLA"
+		StopSound "FlipBuzzLB"
+		StopSound "FlipBuzzLC"
+		StopSound "FlipBuzzLD"
+		StopSound "FlipBuzzRA"
+		StopSound "FlipBuzzRB"
+		StopSound "FlipBuzzRC"
+		StopSound "FlipBuzzRD"
+		Match
+		State = False
+		BIPText.text = " "
+		GameState
+		DynamicUpdatePostIt.enabled = 1
+ 		SortScores
+		CheckHighScores
+		FirstBallOut = 0
+		EVAL("CanPlay" & Players).state = 0
+		Players = 0
+		For x = 1 to 4
+			Rep(x) = 0
+			RepAwarded(x) = 0
+		Next
+		saveHighScore
+		BumperLight1.state = 0
+		If B2SOn Then
+			Controller.B2SSetGameOver 35,1
+			Controller.B2SSetballinplay 32, 0
+			Controller.B2SSetPlayerUp 30, 0
+			Controller.B2SSetcanplay 31, 0
+			If Credit > 0 Then DOF 427, DOFOn
+			If FreePlay = 1 Then DOF 427, DOFOn
+		End If
+	Else
+		RelBall = 1
+		ScoreMotor5.enabled = 1
+		ResetLights
+		BumperLight1.state = 1
+  End If
+End Sub
+
+'***************Drain and Release Ball
+Dim DrainActive
+Sub Drain_Hit()
+	ScoreMotorLoop = 0
+	PlayFieldSound "Drain", 0, Drain, 0.5
+'	RepAwarded(Player) = 0
+	ScoreBonus
+	DrainActive = 1
+End Sub
+
+Sub ReleaseBall
+		PlayFieldSound "FastKickIntoLaunchLane", 0, Drain, 0.5
+		If B2SOn Then DOF 425,DOFPulse
+		Bonus1.state = 1
+		BonusScore = 1
+		ExtraBall1.state = 0: ExtraBall2.state = 0
+		Drain.kick 70,15
+		Launched = 0
+		BIPText.text = BallinPlay
+		If B2SOn Then Controller.B2SSetBallinPlay 32, BallinPlay
+		DrainActive = 0
+End Sub
+
+'***************Shooter Lane Gate Animation
+Sub GateTimer_Timer
+Pgate.rotz = Gate.CurrentAngle * .6
+End Sub
+
+'**********Check if Scoring Bonus is True
+Dim BonusFlag
+Sub ScoreBonus
+	BonusFlag = 1
+	Flag100 = 0: Flag10 = 0:  Flag1000 = 0
+	ScoreMotor.enabled = 1
+	If BonusScore = 0 Then DoubleBonus.state = 0
+	If BonusScore = 0 And ShootAgain.state = 1 And ScoreMotorLoop = 0 Then ResetLights: ReleaseBall
+	If BonusScore = 0 And ShootAgain.state = 0 And ScoreMotorLoop = 0 Then AdvancePlayers
+End Sub
+
+
+'**********Advance Players
+Sub AdvancePlayers
+	 If Players = 1 or Player = Players Then
+		Player = 1
+		EVAL("PuP" & Players).state = 0
+		Pup1.state = 1
+	 Else
+		Player = Player + 1
+		EVAL ("PuP" & (Player - 1)).state = 0
+		EVAL ("PuP" & Player).state = 1
+	End If
+	If B2SOn Then Controller.B2SSetPlayerup 30, Player
+	NextBall
+End Sub
+
+'**********Next Ball
+Sub NextBall
+    If Tilt = True Then
+
+	Bumper1.hashitevent = 1
+
+      Tilt = False
+      TiltTxt.text = " "
+		If B2SOn Then
+			Controller.B2SSetTilt 33,0
+			Controller.B2SSetData 1, 1
+		End If
+    End If
+	If Player = 1 then BallinPlay = BallinPlay + 1
+'	If player = 4 then BallinPlay = 5 'used for match testing
+
+	If BallinPlay > Balls then
+		EndGame = 1
+		CheckContinue
+	Else
+		If State = True Then
+			CheckContinue
+		End If
+	End If
+End Sub
+
+'************Game State Check
+Sub GameState
+	If State = False Then
+		GamOv.text = "Game Over"
+		If B2SOn then Controller.B2SSetGameOver 35,1
+		For i = 1 to 4
+			EVAL("PuP" & i).state = 0
+		Next
+		If B2SOn then Controller.B2SSetData 80,0
+		StopSound "FlipBuzzLA"
+		StopSound "FlipBuzzLB"
+		StopSound "FlipBuzzLC"
+		StopSound "FlipBuzzLD"
+		StopSound "FlipBuzzRA"
+		StopSound "FlipBuzzRB"
+		StopSound "FlipBuzzRC"
+		StopSound "FlipBuzzRD"
+	Else
+		shadows.visible = 1
+		shadowsoff.visible = 0
+		outers.image = "outerson"
+		toparch.image = "topapronon"
+		gatebracket.image = "gatebracketon"
+		GamOv.text = ""
+		MatchTxt.text = ""
+		TiltTxt.text = " "
+		If B2SOn Then
+			Controller.B2SSetTilt 33,0
+			Controller.B2SSetMatch 34,0
+			Controller.B2SSetGameOver 35,0
+			Controller.B2SSetData 80,1
+		End If
+	End If
+End Sub
+
+'*************Ball in Launch Lane on Plunger Tip
+Dim ballREnabled, relGateHit
+Sub BallHome_hit
+	BallREnabled = 1
+	If B2SOn Then DOF 450, DOFOn
+	RelGateHit = 0
+	Set ControlBall = ActiveBall
+    contballinplay = True
+	BonusFlag = 0
+End Sub
+
+'*************Ball off of Plunger Tip
+Sub BallHome_unhit
+	If B2SOn Then DOF 450, DOFOff
+End Sub
+
+'******* for ball control script
+Sub EndControl_Hit()
+    contballinplay = false
+End Sub
+
+'************Check if Ball Out of Launch Lane
+Sub BallsInPlay_hit
+	If BallREnabled = 1 Then
+		ShootAgain.state = 0
+		DoubleBonus.state = 0
+		If B2SOn Then controller.B2SSetShootAgain 36,0
+		BallREnabled = 0
+		BallInLane = False
+	End If
+	FirstBallOut = 1
+End Sub
+
+'**********Reset Lights
+Sub ResetLights
+	StarA.state = 0
+	StarB.state = 0
+	StarC.state = 0
+	StarD.state = 0
+	StarAB.state = 1
+	StarCD.state = 1
+	EBLight = 0
+	For x = 2 to 10
+		EVAL("Bonus" & x).state = 0
+	Next
+	BonusScore = 1
+	BonusA.state = 1
+	BonusB.state = 1
+	BonusC.state = 1
+	BonusD.state = 1
+	Star10001.state = 1
+	Star10002.state = 1
+	DoubleBonus.state = 0
+	ExtraBall1.state = 0
+	ExtraBall2.state = 0
+	Special1.state = 0
+	Special2.state = 0
+	BIPText.text = BallinPlay
+End Sub
+
+'************** Bumpers and Skirt Animation
+dim bump1step
+Sub Bumper1_hit
+	If Tilt = False Then
+		AddScore 100
+		AdvanceRing
+		PlayFieldSound "PopBump", 0, Bumper1, 1
+		If B2SOn Then DOF 405, DOFPulse
+	End If
+End Sub
+
+'Sub Skirt1_timer
+'	Select Case bump1Step
+'		Case 3:	bumpskirt1.RotY=-3
+'		Case 4: bumpskirt1.RotY=2
+'		Case 5: bumpskirt1.RotY=-1
+'		Case 6: bumpskirt1.RotY=1
+'		Case 7: bumpskirt1.RotY=0: bump1Step = 0: Skirt1.enabled = 0
+'	End Select
+'	bump1Step = bump1Step + 1
+'End Sub
+
+'***********Rotate Spinner
+Dim Angle
+Sub SpinnerTimer_Timer
+	Angle = (sin (Spinner.CurrentAngle))
+	Spinner_Mesh.RotX = Spinner.CurrentAngle
+    SpinnerRod.TransZ = -sin( (Spinner.CurrentAngle+180) * (2*3.14/360)) * 5
+    SpinnerRod.TransX = (sin( (Spinner.CurrentAngle- 90) * (2*3.14/360)) * -5)
+End Sub
+
+'************** Slings
+Dim lStep, rStep
+Sub LeftSlingShot_Slingshot
+	PlayfieldSound "SlingShot", 0, SoundPoint12, 1
+	If B2SOn Then DOF 103,DOFPulse
+    LSling.Visible = 0
+    LSling1.Visible = 1
+    Sling1.Rotx = 22
+    LStep = 0
+    LeftSlingShot.TimerEnabled = 1
+	If Tilt = False Then AddScore 10
+End Sub
+
+Sub LeftSlingShot_Timer
+    Select Case LStep
+        Case 3: LSLing1.Visible = 0:LSLing2.Visible = 1:sling1.Rotx = 8
+        Case 4: LSLing2.Visible = 0:LSLing.Visible = 1:sling1.Rotx = 0:LeftSlingShot.TimerEnabled = 0
+    End Select
+    LStep = LStep + 1
+End Sub
+
+Sub RightSlingShot_Slingshot
+	PlayfieldSound "SlingShot", 0, SoundPoint13, 1
+	If B2SOn Then DOF 104,DOFPulse
+    RSling.Visible = 0
+    RSling1.Visible = 1
+    Sling2.RotX = 22
+    RStep = 0
+    RightSlingShot.TimerEnabled = 1
+	If Tilt = False Then AddScore 10
+End Sub
+
+Sub RightSlingShot_Timer
+    Select Case RStep
+        Case 3: RSling1.Visible = 0:RSling2.Visible = 1:Sling2.Rotx = 8
+        Case 4: RSling2.Visible = 0:RSling.Visible = 1:Sling2.Rotx = 0:RightSlingShot.TimerEnabled = 0
+    End Select
+    RStep = RStep + 1
+End Sub
+
+Sub TenPointRubbers_Hit(Idx)
+	If Tilt = False Then AddScore 10
+End Sub
+
+'*************** Kicker
+Dim KickStep
+KickStep = 1
+Sub Kicker_hit
+	PlayFieldSound "SaucerIn", 0, kicker, 1
+	ScoreMotorLoop = 0
+	KickStep = 0
+	If Tilt = False Then Addscore 3000
+End Sub
+
+Sub KickerTimer_timer
+    Select Case kickstep
+        Case 7:
+			kickarmtop_prim.ObjRotX=12
+			kicker.kick 140 - INT(RND*6), 12 + INT(RND*2)
+			PlayFieldSound "SaucerKick",0, kicker, 1
+			If B2SOn Then DOF 405, DOFPulse
+        Case 8:kickarmtop_prim.ObjRotX = -45
+        Case 9:kickarmtop_prim.ObjRotX = -45
+        Case 10:kickarmtop_prim.ObjRotX = 24
+        Case 11:kickarmtop_prim.ObjRotX = 12
+        Case 12:kickarmtop_prim.ObjRotX = 0:kickerTimer.Enabled = 0
+    End Select
+    kickstep = kickstep + 1
+End Sub
+
+'*************** Spinner
+Sub Spinner_Spin
+	PlayFieldSound "fx_spinner", 0, Spinner, 1
+	If Tilt = False Then
+		Addscore 100
+		AdvanceRing
+		If B2SOn Then DOF 416, DOFPulse
+	End If
+End Sub
+
+'*************** Targets
+Dim SideSpecial
+Sub Targets_hit(index)
+	ScoreMotorLoop = 0
+	If Tilt = False Then
+		Select Case (index)
+			Case 0: StarA.state = 1: BonusA.state = 0: Addscore 1000: AdvanceBonus: If B2SOn Then DOF 417, DOFPulse
+			Case 1: StarB.state = 1: BonusB.state = 0: Addscore 1000: AdvanceBonus: If B2SOn Then DOF 417, DOFPulse
+			Case 2: StarC.state = 1: BonusC.state = 0: Addscore 1000: AdvanceBonus: If B2SOn Then DOF 418, DOFPulse
+			Case 3: StarD.state = 1: BonusD.state = 0: Addscore 1000: AdvanceBonus: If B2SOn Then DOF 418, DOFPulse
+			Case 4: AddScore 100: AdvanceRing:If B2SOn Then DOF 408, DOFPulse
+			Case 5: AddScore 100: AdvanceRing:If B2SOn Then DOF 408, DOFPulse
+			Case 6:	AddScore 100: AdvanceRing:If B2SOn Then DOF 409, DOFPulse
+			Case 7: AddScore 100: AdvanceRing:If B2SOn Then DOF 409, DOFPulse
+			Case 8:	AddScore 500:If B2SOn Then DOF 419, DOFPulse
+			Case 9: Addscore 500:If B2SOn Then DOF 420, DOFPulse
+			Case 10: If Special1.state = 1 Then
+						SideSpecial = 1
+						Special
+						If B2SOn Then DOF 406, DOFPulse
+					End If
+			Case 11: If Special2.state = 1 Then
+						SideSpecial = 1
+						Special
+						If B2SOn Then DOF 407, DOFPulse
+					End If
+		End Select
+	End If
+	If BonusA.state = 0 and BonusB.state = 0 and BonusC.state = 0 and BonusD.state = 0 then DoubleBonus.state = 1
+End Sub
+
+'*************** Triggers
+Sub Triggers_hit(index)
+	If Tilt = False Then
+		Select Case (index)
+			Case 0: AddScore 1000: If StarA.state = 1 Then AdvanceBonus :If B2SOn Then DOF 410, DOFPulse
+			Case 1: AddScore 1000: If StarB.state = 1 Then AdvanceBonus:If B2SOn Then DOF 410, DOFPulse
+			Case 2: AddScore 1000: If StarC.state = 1 Then AdvanceBonus:If B2SOn Then DOF 411, DOFPulse
+			Case 3: AddScore 1000: If StarD.state = 1 Then AdvanceBonus:If B2SOn Then DOF 411, DOFPulse
+			Case 4:	AddScore 1000: AdvanceBonus: If B2SOn Then DOF 412, DOFPulse
+			Case 5: Addscore 1000: AdvanceBonus: If B2SOn Then DOF 413, DOFPulse
+			Case 6: AddScore 1000: AdvanceBonus: If B2SOn Then DOF 414, DOFPulse
+			Case 7: AddScore 1000: AdvanceBonus: If B2SOn Then DOF 415, DOFPulse
+		End Select
+	End If
+End Sub
+
+'************** RollOvers
+'Dim button
+'Sub rollOverAnimation_Timer
+'	button = button + 1
+'	Select Case Button
+'		Case 1: WiggleGateOpenButton.transz = -2
+'		Case 2: WiggleGateOpenButton.transz = 0
+'		Case 3: WiggleGateOpenButton.transz = 1
+'		Case 4: WiggleGateOpenButton.transz = 1
+'				button = 0
+'				rollOverAnimation.enabled = 0
+'	End Select
+'End Sub
+
+'************** Wire RollOvers
+Dim wire, wireNumber
+Sub WireRollOvers_hit(index)
+	If Tilt = False Then
+		Select Case (index)
+			Case 0: AddScore 500: If ExtraBall1.state = 1 Then ShootAgain.state = 1: If B2SOn Then DOF 421, DOFPulse
+			Case 1: AddScore 1000: AdvanceBonus: If B2SOn Then DOF 423, DOFPulse
+			Case 2: AddScore 1000: AdvanceBonus: If B2SOn Then DOF 424, DOFPulse
+			Case 3: AddScore 500: If ExtraBall2.state = 1 Then ShootAgain.state = 1: If B2SOn Then DOF 422, DOFPulse
+			Case 4: If B2SOn Then DOF 427, DOFOff
+		End Select
+	End If
+	wireNumber = index
+	wireAnimation.enabled = 1
+End Sub
+
+'wire numbers go 1 -> 4 from left outlane to right outlane, 5 is ball launch roll over wire
+Sub wireAnimation_Timer
+'	wire = wire + 1
+'	Select Case wire
+'		Case 1: EVAL ("wire" & wireNumber + 1).transz = -10
+'		Case 2: EVAL ("wire" & wireNumber + 1).transz = -4
+'		Case 3: EVAL ("wire" & wireNumber + 1).transz = -1
+'		Case 4: EVAL ("wire" & wireNumber + 1).transz = 0
+'				wire = 0
+'				wireAnimation.enabled = 0
+'	End Select
+End Sub
+
+'************** Advance Ring
+Dim Ring
+Sub AdvanceRing
+	Ring = Ring + 1
+
+	If Ring > 10 Then
+		Ring = 1
+	End If
+
+	EVAL("Light" & Ring).state = 1
+
+	If Ring = 1 Then
+		Light10.state = 0
+	Else
+		EVAL("Light" & Ring - 1).state = 0
+	End If
+
+End Sub
+
+'************** Advance Bonus
+Sub AdvanceBonus
+
+	If StarA.state = 1 and StarB.state = 1 and StarC.state = 1 and StarD.state = 1 Then
+		Special1.state = 1
+		Special2.state = 1
+	End If
+
+	PlayFieldSound "Stepper", 0, Kicker, 0.3
+	BonusScore = BonusScore + 1
+
+	If BonusScore < 11 Then
+		EVAL("Bonus" & BonusScore).state = 1
+		If BonusScore > 1 Then EVAL("Bonus" & BonusScore - 1).state = 0
+	End If
+
+	If BonusScore = 11 Then Bonus1.state = 1
+
+	If BonusScore > 11 and BonusScore < 16 Then
+		Eval("Bonus" & BonusScore - 10).state = 1
+		Eval("Bonus" & BonusScore - 11).state = 0
+	End If
+
+	If BonusScore > 7 and BonusScore < 15 Then AlternateEB
+
+	If BonusScore > 14 Then
+		ExtraBall1.state = 1
+		ExtraBall2.state = 1
+		EBLight = 0
+	End If
+
+	If BonusScore > 15 Then BonusScore = 15
+
+End Sub
+
+
+'**************Alternate EB Lights
+Dim EBLight
+Sub AlternateEB
+	EBLight = EBLight + 1
+	If EBLight > 2 Then EBLight = 1
+	Select Case (EBLight)
+		Case 1: ExtraBall1.state = 1
+				ExtraBall2.state = 0
+		Case 2: ExtraBall1.state = 0
+				ExtraBall2.state = 1
+	End Select
+End Sub
+
+'**************Special
+Sub Special
+	If ReplayEB = 1 Then
+		AddCredit = 1
+		ScoreMotor5.enabled = 1
+	Else
+		ShootAgain.state = 1
+		If B2SOn Then controller.B2SSetShootAgain 36,1
+	End If
+	Playsound SoundFXDOF("Knocker",428,DOFPulse,DOFKnocker)
+	If SideSpecial = 1 Then
+		SpecialReset
+		SideSpecial = 0
+	End If
+End Sub
+
+Sub SpecialReset
+	Special1.state = 0
+	Special2.state = 0
+	StarA.state = 0
+	StarB.State = 0
+	StarC.state = 0
+	StarD.state = 0
+	BonusA.state = 1
+	BonusB.state = 1
+	BonusC.state = 1
+	BonusD.state = 1
+End Sub
+
+'***************Score Motor Run one full rotation
+Dim ScoreMotorCount, AddCredit
+Sub Scoremotor5_Timer
+	ScoreMotorCount = ScoreMotorCount + 1
+	PlayFieldSound "ScoreMotorSingleFire", 0, SoundPointScoreMotor, 0.2
+	If ScoremotorCount = 5 Then
+		If RelBall = 1 Then
+			RelBall = 0
+			ReleaseBall
+		End If
+		If AddCredit = 1 Then
+			Credit = Credit + 1
+			Playsound "Reel", 0, reelVol, 0, 0, 0, 1, 1, 0
+			CreditRamp.visible = true: CreditLight.state = true
+			If B2SOn Then DOF 427, DOFOn
+			If Credit > 15 then Credit = 15
+			CreditReel.setvalue(Credit)
+			If B2SOn Then
+				Controller.B2SSetCredits Credit
+				If Credit > 0 Then DOF 427, DOFOn
+			End If
+			AddCredit = 0
+		End If
+		ScoreMotorCount = 0
+		ScoreMotor5.enabled = 0
+	End If
+
+End Sub
+
+'**************Score Motor Routine
+Dim ScoreMotorLoop
+Sub ScoreMotor_timer
+	ScoreMotorLoop = ScoreMotorLoop + 1
+	If ScoreMotorLoop < 6 Then PlayFieldSound "ScoreMotorSingleFire", 0, SoundPointScoreMotor, 0.2
+
+'  These Flags are passed by scores with multiple of 10, 100 or 1000
+	If Flag10 = 1 or Flag100 = 1 or Flag1000 = 1 Then
+		Select Case ScoreMotorLoop
+			Case 1: TotalUp Point: If Point = 1000 Then AdvanceBonus
+			Case 2: If BellRing > 3 Then TotalUp Point
+			Case 3: TotalUp Point: If Point = 1000 Then AdvanceBonus
+			Case 4: If BellRing > 3 Then TotalUp Point
+			Case 5: TotalUp Point: If Point = 1000 Then AdvanceBonus
+			Case 6: ScoreMotorLoop = 0
+					Flag10 = 0
+					Flag100 = 0
+					Flag1000 = 0
+					If KickStep = 0 Then KickerTimer.enabled = 1
+					If DrainActive = 0 Then ScoreMotor.enabled = 0
+		End Select
+	End If
+
+' BonusFlag lets the sub know that the bonus score is being paid out
+' The bonus is paid out on the 2nd and 4th positions of the score motor, the 6th position is the index reel notch
+	If BonusFlag = 1 Then
+		Select Case ScoreMotorLoop
+			Case 1:
+			Case 2: If BonusScore > 0 Then
+						If Tilt = False Then TotalUp 1000
+						If DoubleBonus.State = 0 Then
+							BonusScore = BonusScore - 1
+							If BonusScore > 0 Then
+								If BonusScore < 10  Then
+									If Tilt = False Then EVAL("Bonus" & BonusScore).State =  1
+									EVAL("Bonus" & BonusScore + 1).State = 0
+								End If
+								If BonusScore = 10 Then Bonus1.State = 0
+								If BonusScore > 10 Then
+									If Tilt = False Then EVAL("Bonus" & BonusScore - 10).state = 1
+									EVAL("Bonus" & BonusScore - 9).state = 0
+								End If
+							End If
+							If BonusScore = 0 Then Bonus1.state = 0
+						End If
+					End If
+					If BonusScore > 7 and BonusScore < 15 and Tilt = False Then AlternateEB
+					If BonusScore = 7 then ExtraBall1.state = 0
+			Case 3:
+			Case 4: If BonusScore > 0 Then
+						If Tilt = False Then TotalUp 1000
+						BonusScore = BonusScore -1
+							If BonusScore > 0 Then
+								If BonusScore < 10 Then
+									If Tilt = False Then EVAL("Bonus" & BonusScore).State =  1
+									EVAL("Bonus" & BonusScore + 1).State = 0
+								End If
+								If BonusScore = 10 Then Bonus1.State = 0
+								If BonusScore > 10 Then
+									If Tilt = False Then EVAL("Bonus" & BonusScore - 10).state = 1
+									EVAL("Bonus" & BonusScore - 9).state = 0
+								End If
+							End If
+							If BonusScore = 0 Then Bonus1.state = 0
+					End If
+					If BonusScore > 7 and BonusScore < 15 and Tilt = False Then AlternateEB
+					If BonusScore = 7 then ExtraBall1.state = 0
+			Case 5:
+			Case 6: ScoreMotorLoop = 0
+				If BonusScore < 1 Then
+					ScoreBonus
+					ScoreMotor.enabled = 0
+				End If
+		End Select
+	End If
+End Sub
+
+'***************Scoring Routine
+Dim Flag10, Flag100, Flag1000, Point, Point10
+Sub AddScore(points)
+	If Tilt = False Then
+
+		If Points <100 Then
+'			Number Matching, decrement the match unit for each 10 point score
+			Point10 = (Points mod 100)/10
+			If Matchnumber >= Point10 Then
+				MatchNumber = MatchNumber - Point10
+			Else
+				Point10 = Point10 - MatchNumber
+				MatchNumber = 10 - Point10
+			End If
+
+			BellRing = (Points / 10)
+			If BellRing > 1 Then Point = 10: Flag10 = 1: ScoreMotor.enabled = 1
+			If BellRing = 1 Then
+				TotalUp(10)
+				If Chime = 0 Then
+					PlayFieldSound "Chime10", 0, SoundPoint13, 1
+				Else
+					If B2SOn Then DOF 441,DOFPulse
+				End If
+			End If
+			Exit Sub
+		End If
+
+		If Points > 99 and Points < 1000 Then
+			BellRing = (Points / 100)
+			If BellRing > 1 Then Point = 100: Flag100 = 1: ScoreMotor.enabled = 1
+			If BellRing = 1 Then
+				TotalUp(100)
+				If Chime = 0 Then
+					PlayFieldSound "Chime100", 0, SoundPoint13, 1
+				Else
+					If B2SOn Then DOF 442,DOFPulse
+				End If
+			End If
+			Exit Sub
+		End If
+
+		If Points > 999 Then
+			BellRing = (Points / 1000)
+			If BellRing > 1 Then Point = 1000: Flag1000 = 1: ScoreMotor.enabled = 1
+			If BellRing = 1 Then
+				TotalUp(1000)
+				If Chime = 0 Then
+					PlayFieldSound "Chime1000", 0, SoundPoint13, 1
+				Else
+					If B2SOn Then DOF 443,DOFPulse
+				End If
+			End If
+		End If
+
+	End If
+End Sub
+
+Dim ReplayX, RepAwarded(5), Replay(7), ReplayText(3), reelVol, reelLpan, reelRpan
+Sub TotalUp(Points)
+	If B2SOn and showDT = False Then	'Modify "If Player" logic below if locations of reels are different
+		If Player = 1 or Player = 3 Then
+		playsound "Reel1", 0, reelVol, reelLpan, 0, 0, 1, 1, 0
+		Else
+		playsound "Reel1", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+		End If
+	End If
+
+	If showDT = True Then
+		If Player = 1 Then
+		playsound "Reel1", 0, reelVol, reelLpan, 0, 0, 1, 1, 0
+		Else
+		playsound "Reel1", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+		End If
+	End If
+
+	If Flag10 = 1 Then
+		If Chime = 0 Then
+			PlayFieldSound "Chime10", 0, SoundPoint13, 1
+		Else
+			If B2SOn Then DOF 441,DOFPulse
+		End If
+	End If
+
+	If Flag100 = 1 Then
+		If Chime = 0 Then
+			PlayFieldSound  "Chime100", 0, SoundPoint13, 1
+		Else
+			If B2SOn Then DOF 442,DOFPulse
+		End If
+	End If
+
+	If Flag1000 = 1 Then
+		If Chime = 0 Then
+			PlayFieldSound  "Chime1000", 0, SoundPoint13, 1
+		Else
+			If B2SOn Then DOF 443,DOFPulse
+		End If
+	End If
+
+	If BonusFlag = 1 Then
+		If Chime = 0 Then
+			PlayFieldSound  "Chime1000", 0, SoundPoint13, 1
+		Else
+			If B2SOn Then DOF 443,DOFPulse
+		End If
+	End If
+
+	Score(Player) = Score(Player) + Points
+	SReel(Player).addvalue(Points)
+
+	If Score(Player) > 99999 Then
+		If B2SOn Then controller.B2SSetData Player + 24, 1
+	End If
+	If B2SOn Then Controller.B2SSetScorePlayer Player, Score(Player)
+
+	For ReplayX = Rep(Player) +1 to 3
+		If Score(Player) => Replay(ReplayX) Then
+			If ReplayEB = 1 Then
+				AddCredit = 1
+				ScoreMotor5.enabled = 1
+			Else
+				ShootAgain.state = 1
+				If B2SOn Then controller.B2SSetShootAgain 36,1
+			End If
+			Rep(Player) = Rep(Player) + 1
+				Playsound SoundFXDOF("Knocker",428,DOFPulse,DOFKnocker)
+		End If
+	Next
+
+End Sub
+
+
+'***************Tilt
+Sub CheckTilt
+	If Tilttimer.Enabled = True Then
+		TiltSens = TiltSens + 1
+		If TiltSens = 3 Then
+		Tilt = True
+		tilttxt.text="TILT"
+       	If B2SOn Then Controller.B2SSetTilt 33,1
+       	If B2SOn Then Controller.B2SSetdata 1, 0
+		TurnOff
+	 End If
+	Else
+	 TiltSens = 0
+	 Tilttimer.Enabled = True
+	End If
+End Sub
+
+Sub Tilttimer_Timer()
+	Tilttimer.Enabled = False
+End Sub
+
+'***************Match
+Sub Match
+	If MatchNumber = 0 Then MatchNumber = 10
+
+		If B2SOn Then
+			Controller.B2SSetMatch 34,MatchNumber
+		End If
+
+	MatchTxt.text = MatchNumber * 10
+
+	For i = 1 to Players
+		If MatchNumber = 10 Then MatchNumber = 0
+		If (MatchNumber * 10) = (Score(i) mod 100) Then
+			AddCredit = 1
+			ScoreMotor5.enabled = 1
+			Playsound SoundFXDOF("Knocker",428,DOFPulse,DOFKnocker)
+	    End If
+    Next
+End Sub
+
+'************Reset Reels
+
+'This Sub looks at each individual digit in each players score and sets them in an array RScore.  If the value is >0 and <9
+'then the players score is increased by one times the position value of that digit (ie 1 * 1000 for the 1000's digit)
+'If the value of the digit is 9 then it subtracts 9 times the postion value of that digit (ie 9*100 for the 100's digit)
+'so that the score is not rolled over and the next digit in line gets incremented as well (ie 9 in the 10's positon gets
+'incremented so the 100's position rolls up by one as well since 90 -> 100).  Lastly the RScore array values get incremented
+'by one to get ready for the next pass.
+
+Dim RScore(4,5), ResetLoop, Test, PlayerTest, ResetFlag, ReelFlag, ReelStop, ReelDone(4)
+Sub CountUp
+	For PlayerTest = 1 to 4
+		For Test = 0 to 4
+			RScore(PlayerTest,Test) = Int(Score(PlayerTest)/10^Test) mod 10
+		Next
+	Next
+
+	For PlayerTest = 1 to 4
+		For x = 1 to 4
+			If Rscore(PlayerTest, x) > 0 And Rscore(PlayerTest, x) < 9 Then Score(PlayerTest) = Score(PlayerTest) + 10^x
+			If RScore(PlayerTest, x) = 9 Then Score(PlayerTest) = Score(PlayerTest) - (9 * 10^x)
+			If RScore(PlayerTest, x) > 0 Then RScore(PlayerTest, x) = RScore(PlayerTest, x) + 1
+			If RScore(PlayerTest, x) = 10 Then RScore(PlayerTest, x) = 0
+		Next
+	Next
+	If Score(1) = 0 and Score(2) = 0 and Score(3) = 0 and Score(4) = 0 Then
+		ReelFlag = 1
+		For i = 1 to MaxPlayers
+			Score(i) = 0
+			Rep(i) = 0
+			RepAwarded(i) = 0
+		Next
+	End If
+End Sub
+
+'This Sub sets each B2S reel or Desdktop reels to their new values and then plays the score motor sound each time and the
+'reel sounds only if the reels are being stepped
+
+Sub UpdateReels
+	For PlayerTest = 1 to 4
+		If B2SOn and showDT = False and reelDone(playerTest) = 0 and reelStop = 0 Then
+			controller.B2SSetScorePlayer playerTest, score(playerTest)
+			If reelDone(1) = 0 and playerTest = 1 Then playsound "Reel1", 0, reelVol, reelLpan, 0, 0, 1, 1, 0
+			If reelDone(2) = 0 and playerTest = 2 Then playsound "Reel2", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+			If reelDone(3) = 0 and playerTest = 3 Then playsound "Reel3", 0, reelVol, reelLpan, 0, 0, 1, 1, 0
+			If reelDone(4) = 0 and playerTest = 4 Then playsound "Reel4", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+			If score(playerTest) = 0 Then reelDone(playerTest) = 1
+		End If
+
+		If showDT = True and reelDone(playerTest) = 0 and reelStop = 0 Then
+			sReel(playerTest).setvalue (score(playerTest))
+			If reelDone(1) = 0 and playerTest = 1 Then playsound "Reel1", 0, reelVol, reelLpan, 0, 0, 1, 1, 0
+			If reelDone(2) = 0 and playerTest = 2 Then playsound "Reel2", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+			If reelDone(3) = 0 and playerTest = 3 Then playsound "Reel3", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+			If reelDone(4) = 0 and playerTest = 4 Then playsound "Reel4", 0, reelVol, reelRpan, 0, 0, 1, 1, 0
+			If score(playerTest) = 0 Then reelDone(playerTest) = 1
+		End If
+
+	Next
+	PlayfieldSound "ScoreMotorSingleFire", 0, SoundPointScoreMotor, 0.2
+	If ReelStop = 0 Then Playsound "reel"
+	If ReelFlag = 1 Then ReelStop = 1
+
+End Sub
+
+'This Timer runs a loop that calls the CountUp and UpdateReels routines to step the reels up five times and Then
+'check to see if they are all at zero during a two loop pause and then step them the rest of the way to zero
+
+Dim TestFlag
+Sub ResetReel_Timer
+	For x = 1 to 4
+		Score(x) = (Score(x) Mod 100000)
+	Next
+	ResetLoop = ResetLoop + 1
+	If ResetLoop = 1 and Score(1) = 0 and Score(2) = 0 and Score(3) = 0 and Score(4) = 0 Then
+		ResetLoop = 0
+		If TestFlag = 0 Then ReleaseBall
+		TestFlag = 0
+		ResetReel.enabled = 0
+		Exit Sub
+	End If
+	Select Case ResetLoop
+		Case 1: CountUp: UpdateReels
+		Case 2: CountUp: UpdateReels
+		Case 3: CountUp: UpdateReels
+		Case 4: CountUp: UpdateReels
+		Case 5: CountUp: UpdateReels
+		Case 6: If ReelStop = 1 Then
+					ResetLoop = 0
+					ReelFlag = 0
+					ReelStop = 0
+					If TestFlag = 0 Then ReleaseBall
+					TestFlag = 0
+					ResetReel.enabled = 0
+					Exit Sub
+				End If
+
+		Case 7:
+		Case 8: CountUp: UpdateReels
+		Case 9: CountUp: UpdateReels
+		Case 10: CountUp: UpdateReels
+		Case 11: CountUp: UpdateReels
+		Case 12: CountUp: UpdateReels:
+			ResetLoop = 0
+			ReelFlag = 0
+			ReelStop = 0
+			If TestFlag = 0 Then ReleaseBall
+			TestFlag = 0
+			ResetReel.enabled = 0
+			Exit Sub
+	End Select
+
+End Sub
+
+'************************************************Post It Note Section**************************************************************************
+'***************Static Post It Note Update
+Dim  hsY, shift, scoreMil, score100K, score10K, scoreK, score100, score10, scoreUnit
+Dim hsInitial0, hsInitial1, hsInitial2
+Dim hsArray: hsArray = Array("HS_0","HS_1","HS_2","HS_3","HS_4","HS_5","HS_6","HS_7","HS_8","HS_9","HS_Space","HS_Comma")
+Dim hsiArray: hsIArray = Array("HSi_0","HSi_1","HSi_2","HSi_3","HSi_4","HSi_5","HSi_6","HSi_7","HSi_8","HSi_9","HSi_10","HSi_11","HSi_12","HSi_13","HSi_14","HSi_15","HSi_16","HSi_17","HSi_18","HSi_19","HSi_20","HSi_21","HSi_22","HSi_23","HSi_24","HSi_25","HSi_26")
+
+Sub updatePostIt
+	scoreMil = Int(highScore(0)/1000000)
+	score100K = Int( (highScore(0) - (scoreMil*1000000) ) / 100000)
+	score10K = Int( (highScore(0) - (scoreMil*1000000) - (score100K*100000) ) / 10000)
+	scoreK = Int( (highScore(0) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) ) / 1000)
+	score100 = Int( (highScore(0) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) ) / 100)
+	score10 = Int( (highScore(0) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) - (score100*100) ) / 10)
+	scoreUnit = (highScore(0) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) - (score100*100) - (score10*10) )
+
+	pScore6.image = hsArray(scoreMil):If highScore(0) < 1000000 Then pScore6.image = hsArray(10)
+	pScore5.image = hsArray(score100K):If highScore(0) < 100000 Then pScore5.image = hsArray(10)
+	pScore4.image = hsArray(score10K):If highScore(0) < 10000 Then pScore4.image = hsArray(10)
+	pScore3.image = hsArray(scoreK):If highScore(0) < 1000 Then pScore3.image = hsArray(10)
+	pScore2.image = hsArray(score100):If highScore(0) < 100 Then pScore2.image = hsArray(10)
+	pScore1.image = hsArray(score10):If highScore(0) < 10 Then pScore1.image = hsArray(10)
+	pScore0.image = hsArray(scoreUnit):If highScore(0) < 1 Then pScore0.image = hsArray(10)
+	If highScore(0) < 1000 Then
+		PComma.image = hsArray(10)
+	Else
+		pComma.image = hsArray(11)
+	End If
+	If highScore(0) < 1000000 Then
+		pComma1.image = hsArray(10)
+	Else
+		pComma1.image = hsArray(11)
+	End If
+	If highScore(0) > 999999 Then shift = 0 :pComma.transx = 0
+	If highScore(0) < 1000000 Then shift = 1:pComma.transx = -10
+	If highScore(0) < 100000 Then shift = 2:pComma.transx = -20
+	If highScore(0) < 10000 Then shift = 3:pComma.transx = -30
+	For hsY = 0 to 6
+		EVAL("Pscore" & hsY).transx = (-10 * shift)
+	Next
+	initial1.image = hsIArray(initial(0,1))
+	initial2.image = hsIArray(initial(0,2))
+	initial3.image = hsIArray(initial(0,3))
+End Sub
+
+'***************Show Current Score
+Sub showScore
+	scoreMil = Int(highScore(activeScore(flag))/1000000)
+	score100K = Int( (highScore(activeScore(flag)) - (scoreMil*1000000) ) / 100000)
+	score10K = Int( (highScore(activeScore(flag)) - (scoreMil*1000000) - (score100K*100000) ) / 10000)
+	scoreK = Int( (highScore(activeScore(flag)) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) ) / 1000)
+	score100 = Int( (highScore(activeScore(flag)) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) ) / 100)
+	score10 = Int( (highScore(activeScore(flag)) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) - (score100*100) ) / 10)
+	scoreUnit = (highScore(activeScore(flag)) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) - (score100*100) - (score10*10) )
+
+	pScore6.image = hsArray(scoreMil):If highScore(activeScore(flag)) < 1000000 Then pScore6.image = hsArray(10)
+	pScore5.image = hsArray(score100K):If highScore(activeScore(flag)) < 100000 Then pScore5.image = hsArray(10)
+	pScore4.image = hsArray(score10K):If highScore(activeScore(flag)) < 10000 Then pScore4.image = hsArray(10)
+	pScore3.image = hsArray(scoreK):If highScore(activeScore(flag)) < 1000 Then pScore3.image = hsArray(10)
+	pScore2.image = hsArray(score100):If highScore(activeScore(flag)) < 100 Then pScore2.image = hsArray(10)
+	pScore1.image = hsArray(score10):If highScore(activeScore(flag)) < 10 Then pScore1.image = hsArray(10)
+	pScore0.image = hsArray(scoreUnit):If highScore(activeScore(flag)) < 1 Then pScore0.image = hsArray(10)
+	If highScore(activeScore(flag)) < 1000 Then
+		pComma.image = hsArray(10)
+	Else
+		pComma.image = hsArray(11)
+	End If
+	If highScore(activeScore(flag)) < 1000000 Then
+		pComma1.image = hsArray(10)
+	Else
+		pComma1.image = hsArray(11)
+	End If
+	If highScore(flag) > 999999 Then shift = 0 :pComma.transx = 0
+	If highScore(activeScore(flag)) < 1000000 Then shift = 1:pComma.transx = -10
+	If highScore(activeScore(flag)) < 100000 Then shift = 2:pComma.transx = -20
+	If highScore(activeScore(flag)) < 10000 Then shift = 3:pComma.transx = -30
+	For HSy = 0 to 6
+		EVAL("Pscore" & hsY).transx = (-10 * shift)
+	Next
+	initial1.image = hsIArray(initial(activeScore(flag),1))
+	initial2.image = hsIArray(initial(activeScore(flag),2))
+	initial3.image = hsIArray(initial(activeScore(flag),3))
+End Sub
+
+'***************Dynamic Post It Note Update
+Dim scoreUpdate, dHSx
+Sub dynamicUpdatePostIt_Timer
+	scoreMil = Int(highScore(scoreUpdate)/1000000)
+	score100K = Int( (highScore(ScoreUpdate) - (scoreMil*1000000) ) / 100000)
+	score10K = Int( (highScore(scoreUpdate) - (ScoreMil*1000000) - (Score100K*100000) ) / 10000)
+	scoreK = Int( (highScore(scoreUpdate) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) ) / 1000)
+	score100 = Int( (highScore(ScoreUpdate) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) ) / 100)
+	score10 = Int( (highScore(ScoreUpdate) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) - (score100*100) ) / 10)
+	scoreUnit = (highScore(ScoreUpdate) - (scoreMil*1000000) - (score100K*100000) - (score10K*10000) - (scoreK*1000) - (score100*100) - (score10*10) )
+
+	pScore6.image = hsArray(ScoreMil):If highScore(scoreUpdate) < 1000000 Then pScore6.image = hsArray(10)
+	pScore5.image = hsArray(Score100K):If highScore(scoreUpdate) < 100000 Then pScore5.image = hsArray(10)
+	pScore4.image = hsArray(Score10K):If highScore(scoreUpdate) < 10000 Then pScore4.image = hsArray(10)
+	pScore3.image = hsArray(ScoreK):If highScore(scoreUpdate) < 1000 Then pScore3.image = hsArray(10)
+	pScore2.image = hsArray(Score100):If highScore(scoreUpdate) < 100 Then pScore2.image = hsArray(10)
+	pScore1.image = hsArray(Score10):If highScore(scoreUpdate) < 10 Then pScore1.image = hsArray(10)
+	pScore0.image = hsArray(ScoreUnit):If highScore(scoreUpdate) < 1 Then pScore0.image = hsArray(10)
+	If highScore(scoreUpdate) < 1000 Then
+		pComma.image = hsArray(10)
+	Else
+		pComma.image = hsArray(11)
+	End If
+	If highScore(scoreUpdate) < 1000000 Then
+		pComma1.image = hsArray(10)
+	Else
+		pComma1.image = hsArray(11)
+	End If
+	If highScore(scoreUpdate) > 999999 Then shift = 0 :pComma.transx = 0
+	If highScore(scoreUpdate) < 1000000 Then shift = 1:pComma.transx = -10
+	If highScore(scoreUpdate) < 100000 Then shift = 2:pComma.transx = -20
+	If highScore(scoreUpdate) < 10000 Then shift = 3:pComma.transx = -30
+	For dHSx = 0 to 6
+		EVAL("Pscore" & dHSx).transx = (-10 * shift)
+	Next
+	initial1.image = hsIArray(initial(scoreUpdate,1))
+	initial2.image = hsIArray(initial(scoreUpdate,2))
+	initial3.image = hsIArray(initial(scoreUpdate,3))
+	scoreUpdate = scoreUpdate + 1
+	If scoreUpdate = 5 then scoreUpdate = 0
+End Sub
+
+
+'***************Bubble Sort
+Dim TempScore(2), TempPos(3), Position(5)
+Dim BSx, BSy
+'Scores are sorted high to low with Position being the player's number
+Sub SortScores
+	For BSx = 1 to 4
+		Position(BSx) = BSx
+	Next
+	For BSx = 1 to 4
+		For BSy = 1 to 3
+			If Score(BSy) < Score(BSy+1) Then
+				TempScore(1) = Score(BSy+1)
+				TempPos(1) = Position(BSy+1)
+				Score(BSy+1) = Score(BSy)
+				Score(BSy) = TempScore(1)
+				Position(BSy+1) = Position(BSy)
+				Position(BSy) = TempPos(1)
+			End If
+		Next
+	Next
+End Sub
+
+'*************Check for High Scores
+
+Dim HighScore(5), ActiveScore(5), HS, CHx, CHy, CHz, CHix, TempI(4), TempI2(4), Flag
+'goes through the 5 high scores one at a time and compares them to the player's scores high to
+'if a player's score is higher it marks that postion with ActiveScore(x) and moves all of the other
+'	high scores down by one along with the high score's player initials
+'	also clears the new high score's initials for entry later
+Sub CheckHighScores
+	For HS = 1 to 4     							'look at all 5 saved high scores
+		For CHy = 0 to 4   					    	'look at 4 player scores
+			If Score(HS) > HighScore(CHy) Then
+				Flag = Flag + 1						'flag to show how many high scores needs replacing
+				TempScore(1) = HighScore(CHy)
+				HighScore(CHy) = Score(HS)
+				ActiveScore(HS) = CHy				'ActiveScore(x) is the high score being modified with x=1 the largest and x=4 the smallest
+				For CHix = 1 to 3					'set initals to blank and make temporary initials = to intials being modifed so they can move down one high score
+					TempI(Chix) = Initial(CHy,CHix)
+					Initial(CHy,CHix) = 0
+				Next
+
+				If CHy < 4 Then						'check if not on lowest high score for overflow error prevention
+					For CHz = CHy+1 to 4			'set as high score one more than score being modifed (CHy+1)
+						TempScore(2) = HighScore(CHz)	'set a temporaray high score for the high score one higher than the one being modified
+						HighScore(CHz) = TempScore(1)	'set this score to the one being moved
+						TempScore(1) = TempScore(2)		'reassign TempScore(1) to the next higher high score for the next go around
+						For CHix = 1 to 3
+							TempI2(CHix) = Initial(CHz,CHix)	'make a new set of temporary initials
+						Next
+						For CHix = 1 to 3
+							Initial(CHz,CHix) = TempI(Chix)		'set the initials to the set being moved
+							TempI(CHix) = TempI2(CHix)			'reassign the initials for the next go around
+						Next
+					Next
+				End If
+				CHy = 4								'if this loop was accessed set CHy to 4 to get out of the loop
+			End If
+		Next
+	Next
+'	Goto Initial Entry
+		HSi = 1			'go to the first initial for entry
+		HSx = 1			'make the displayed inital be "A"
+		If Flag > 0 Then	'Flag 0 when all scores are updated so leave subroutine and reset variables
+			ShowScore
+			PlayerEntry.visible = 1
+			PlayerEntry.image = "Player" & Position(Flag)
+			Initial(ActiveScore(Flag),1) = 1	'make first inital "A"
+			For CHy = 2 to 3
+				Initial(ActiveScore(Flag),CHy) = 0	'set other two to " "
+			Next
+			For CHy = 1 to 3
+				EVAL("Initial" & CHy).image = HSiArray(Initial(ActiveScore(Flag),CHy))		'display the initals on the tape
+			Next
+			InitialTimer1.enabled = 1		'flash the first initial
+			DynamicUpdatePostIt.enabled = 0		'stop the scrolling intials timer
+			Playsound SoundFXDOF("Knocker",428,DOFPulse,DOFKnocker)
+			EnableInitialEntry = True
+		End If
+End Sub
+
+
+'************Enter Initials Keycode Subroutine
+Dim Initial(6,5), initialsDone
+Sub EnterIntitals(keycode)
+		If KeyCode = LeftFlipperKey Then
+			HSx = HSx - 1						'HSx is the inital to be displayed A-Z plus " "
+			If HSx < 0 Then HSx = 26
+			If HSi < 4 Then EVAL("Initial" & HSi).image = HSiArray(HSx)		'HSi is which of the three intials is being modified
+			PlayFieldSound "target", 0, PTape1, 1.5
+		End If
+		If keycode = RightFlipperKey Then
+			HSx = HSx + 1
+			If HSx > 26 Then HSx = 0
+			If HSi < 4 Then EVAL("Initial"& HSi).image = HSiArray(HSx)
+			PlayFieldSound "target", 0, PTape1, 1.5
+		End If
+		If keycode = StartGameKey and initialsDone = 0 Then
+			If HSi < 3 Then									'if not on the last initial move on to the next intial
+				EVAL("Initial" & HSi).image = HSiArray(HSx)	'display the initial
+				Initial(ActiveScore(Flag), HSi) = HSx		'save the inital
+				EVAL("InitialTimer" & HSi).enabled = 0		'turn that inital's timer off
+				EVAL("Initial" & HSi).visible = 1			'make the initial not flash but be turn on
+				Initial(ActiveScore(Flag),HSi + 1) = HSx	'move to the next initial and make it the same as the last initial
+				EVAL("Initial" & HSi +1).image = HSiArray(HSx)	'display this intial
+'				y = 1
+				EVAL("InitialTimer" & HSi + 1).enabled = 1	'make the new intial flash
+				HSi = HSi + 1								'increment HSi
+				playSound "metalhit_medium"
+			Else										'if on the last initial then get ready yo exit the subroutine
+				Initial3.visible = 1					'make the intial visible
+				InitialTimer3.enabled = 0				'shut off the flashing
+				Initial(ActiveScore(Flag),3) = HSx		'set last initial
+				InitialEntry							'exit subroutine
+				playSound "metalhit_medium"
+			End If
+		End If
+End Sub
+
+'************Update Initials and see if more scores need to be updated
+Dim eIX
+Sub initialEntry
+	playsound SoundFXDOF("Chime10",141,DOFPulse,DOFChimes)
+	flag = flag - 1
+'	TextBox2.text = Flag
+	hsI = 1
+	If flag < 0 Then flag = 0: Exit Sub
+	If flag = 0 Then 					'exit high score entry mode and reset variables
+		initialsDone = 1				'prevents changes in intials while the highScoreDelay timer waits to finish
+		players = 0
+		For eIX = 1 to 4
+			activeScore(eIX) = 0
+			position(eIX) = 0
+		Next
+		For eIX = 1 to 3
+			EVAL("InitialTimer" & eIX).enabled = 0
+		Next
+		playerEntry.visible = 0
+		scoreUpdate = 0						'go to the highest score
+		updatePostIt						'display that score
+		highScoreDelay.enabled = 1
+	Else
+		showScore
+		playerEntry.image = "Player" & position(flag)
+'		TextBox3.text = ActiveScore(Flag) 	'tells which high score is being entered
+'		TextBox2.text = Flag
+'		TextBox1.text =  Position(Flag) 	'tells which player is entering values
+		initial(activeScore(flag),1) = 1	'set the first initial to "A"
+		For chY = 2 to 3
+			initial(activeScore(flag),chY) = 0	'set the other two to " "
+		Next
+		For chY = 1 to 3
+			EVAL("Initial" & chY).image = hsIArray(initial(activeScore(flag),chY))	'display the intials
+		Next
+		hsX = 1							'go to the letter "A"
+		initialTimer1.enabled = 1		'flash the first intial
+	End If
+End Sub
+
+'************Delay to prevent start button push for last initial from starting game Update
+Sub highScoreDelay_timer
+	highScoreDelay.enabled = 0
+	enableInitialEntry = False
+	initialsDone = 0
+	saveHighScore
+	For eIX = 1 to 3
+		EVAL("InitialTimer" & eIX).enabled = 0
+	Next
+	dynamicUpdatePostIt.enabled = 1		'turn scrolling high score back on
+End Sub
+
+'************Flash Initials Timers
+Sub InitialTimer1_Timer
+	y = y + 1
+	If y > 1 Then y = 0
+	If y = 0 Then
+		Initial1.visible = 1
+	Else
+		Initial1.visible = 0
+	End If
+End Sub
+
+ Sub InitialTimer2_Timer
+	y = y + 1
+	If y > 1 Then y = 0
+	If y = 0 Then
+		Initial2.visible = 1
+	Else
+		Initial2.visible = 0
+	End If
+End Sub
+
+Sub InitialTimer3_Timer
+	y = y + 1
+	If y > 1 Then y = 0
+	If y = 0 Then
+		Initial3.visible = 1
+	Else
+		Initial3.visible = 0
+	End If
+End Sub
+
+'*************Load Scores
+Sub loadHighScore
+	Dim fileObj
+	Dim scoreFile
+	Dim temp(40)
+	Dim textStr
+
+	dim hiInitTemp(3)
+	dim hiInit(5)
+
+    Set fileObj = CreateObject("Scripting.FileSystemObject")
+	If Not fileObj.FolderExists(UserDirectory) Then
+		Exit Sub
+	End If
+	If Not fileObj.FileExists(UserDirectory & cOptions) Then
+		Exit Sub
+	End If
+	Set scoreFile = fileObj.GetFile(UserDirectory & cOptions)
+	Set textStr = scoreFile.OpenAsTextStream(1,0)
+		If (textStr.AtEndOfStream = True) Then
+			Exit Sub
+		End If
+
+		For x = 1 to 32
+			temp(x) = textStr.readLine
+		Next
+		TextStr.Close
+		For x = 0 to 4
+			highScore(x) = cdbl (temp(x+1))
+		Next
+		For x = 0 to 4
+			hiInit(x) = (temp(x + 6))
+		Next
+		i = 10
+		For x = 0 to 4
+			For y = 1 to 3
+				i = i + 1
+				initial(x,y) = cdbl (temp(i))
+			Next
+		Next
+		credit = cdbl (temp(26))
+		freePlay = cdbl (temp(27))
+		balls = cdbl (temp(28))
+		matchNumber = cdbl (temp(29))
+		chime = cdbl (temp(30))
+		pfOption = cdbl (temp(31))
+		ReplayEB = cdbl (temp(32))
+		Set scoreFile = Nothing
+	    Set fileObj = Nothing
+End Sub
+
+'************Save Scores
+Sub saveHighScore
+Dim hiInit(5)
+Dim hiInitTemp(5)
+Dim FolderPath
+	For x = 0 to 4
+		For y = 1 to 3
+			hiInitTemp(y) = chr(initial(x,y) + 64)
+		Next
+		hiInit(x) = hiInitTemp(1) + hiInitTemp(2) + hiInitTemp(3)
+	Next
+	Dim fileObj
+	Dim scoreFile
+	Set fileObj = createObject("Scripting.FileSystemObject")
+	If Not fileObj.folderExists(userDirectory) Then
+		Exit Sub
+	End If
+	Set scoreFile = fileObj.createTextFile(userDirectory & cOptions,True)
+
+		For x = 0 to 4
+			scoreFile.writeLine highScore(x)
+		Next
+		For x = 0 to 4
+			scoreFile.writeLine hiInit(x)
+		Next
+		For x = 0 to 4
+			For y = 1 to 3
+				scoreFile.writeLine initial(x,y)
+			Next
+		Next
+		scoreFile.WriteLine credit
+		scorefile.writeline freePlay
+		scoreFile.WriteLine balls
+		scoreFile.WriteLine matchNumber
+		scoreFile.WriteLine chime
+		scoreFile.WriteLine pfOption
+		scoreFile.WriteLine ReplayEB
+		scoreFile.Close
+	Set scoreFile = Nothing
+	Set fileObj = Nothing
+
+'This section of code writes a file in the User Folder of VisualPinball that contains the High Score data for PinballY.
+'PinballY can read this data and display the high scores on the DMD during game selection mode in PinballY.
+
+	Set FileObj = CreateObject("Scripting.FileSystemObject")
+
+	If cPinballY = 0 Then Exit Sub
+
+	If Not FileObj.FolderExists(UserDirectory) Then
+		Exit Sub
+	End If
+
+	FolderPath = FileObj.GetParentFolderName(UserDirectory)
+
+	If cPinballY = 1 Then
+		Set ScoreFile = FileObj.CreateTextFile(FolderPath & "/Tables/" & hsFileName & ".PinballYHighScores",True)
+	Else
+		Set ScoreFile = FileObj.CreateTextFile(UserDirectory & hsFileName & ".PinballYHighScores",True)
+	End If
+
+	For x = 0 to 4
+		ScoreFile.WriteLine HighScore(x)
+		ScoreFile.WriteLine HiInit(x)
+	Next
+	ScoreFile.Close
+	Set ScoreFile = Nothing
+	Set FileObj = Nothing
+
+End Sub
+
+'************Shut Down and De-Energize on Tilt
+Sub TurnOff
+	ExtraBall1.State = 0
+	ExtraBall2.State = 0
+	ShootAgain.State = 0
+	DoubleBonus.State = 0
+
+	For x = 1 to 10
+		EVAL("Bonus" & x).State = 0
+	Next
+
+	Bumper1.hashitevent = 0
+  	LeftFlipper.RotateToStart
+	StopSound "FlipBuzzLA"
+	StopSound "FlipBuzzLB"
+	StopSound "FlipBuzzLC"
+	StopSound "FlipBuzzLD"
+	StopSound "FlipBuzzRA"
+	StopSound "FlipBuzzRB"
+	StopSound "FlipBuzzRC"
+	StopSound "FlipBuzzRD"
+	If B2SOn Then DOF 101, DOFOff
+	RightFlipper.RotateToStart
+	If B2SOn Then DOF 102, DOFOff
+	BonusScore = 0
+End Sub
+
+'*****************************************************Supporting Code Written By Others*************************************
+
+'*****************************************
+'			BALL SHADOW
+'*****************************************
+Dim BallShadow
+BallShadow = Array (BallShadow001,BallShadow002,BallShadow003,BallShadow004,BallShadow005)
+
+Sub BallShadowUpdate_timer()
+    Dim BOT, b
+    BOT = GetBalls
+    ' hide shadow of deleted balls
+    If UBound(BOT)<(tnob-1) Then
+        For b = (UBound(BOT) + 1) to (tnob-1)
+            BallShadow(b).visible = 0
+        Next
+    End If
+    ' exit the Sub if no balls on the table
+    If UBound(BOT) = -1 Then Exit Sub
+    ' render the shadow for each ball
+    For b = 0 to UBound(BOT)
+        If BOT(b).X < Table1.Width/2 Then
+            BallShadow(b).X = ((BOT(b).X) + ((BOT(b).X - (Table1.Width/2))/7))
+        Else
+            BallShadow(b).X = ((BOT(b).X) + ((BOT(b).X - (Table1.Width/2))/7))
+        End If
+        ballShadow(b).Y = BOT(b).Y + 10
+        If BOT(b).Z > 20 Then
+            BallShadow(b).visible = 1
+        Else
+            BallShadow(b).visible = 0
+        End If
+    Next
+End Sub
+
+'************************************************************************
+'                         Ball Control
+'************************************************************************
+
+Dim Cup, Cdown, Cleft, Cright, Zup, contball, contballinplay, ControlBall, bcboost
+Dim bcvel, bcyveloffset, bcboostmulti
+
+bcboost = 1 'Do Not Change - default setting
+bcvel = 4 'Controls the speed of the ball movement
+bcyveloffset = 0 'Offsets the force of gravity to keep the ball from drifting vertically on the table, should be negative
+bcboostmulti = 3 'Boost multiplier to ball veloctiy (toggled with the B key)
+
+Sub BallControl_Timer()
+    If Contball and ContBallInPlay then
+        If Cright = 1 Then
+            ControlBall.velx = bcvel*bcboost
+          ElseIf Cleft = 1 Then
+            ControlBall.velx = -bcvel*bcboost
+          Else
+            ControlBall.velx=0
+        End If
+        If Cup = 1 Then
+            ControlBall.vely = -bcvel*bcboost
+          ElseIf Cdown = 1 Then
+            ControlBall.vely = bcvel*bcboost
+          Else
+            ControlBall.vely = bcyveloffset
+        End If
+        If Zup = 1 Then
+            ControlBall.velz = bcvel*bcboost
+		Else
+			ControlBall.velz = -bcvel*bcboost
+        End If
+    End If
+End Sub
+
+Sub LightsRandom_Timer()
+	Select Case Int(Rnd*2)+1
+		Case 1 : DOF 157, 1
+		Case 2 : DOF 157, 0
+	End Select
+	Select Case Int(Rnd*2)+1
+		Case 1 : DOF 158, 1
+		Case 2 : DOF 158, 0
+	End Select
+	Select Case Int(Rnd*2)+1
+		Case 1 : DOF 159, 1
+		Case 2 : DOF 159, 0
+	End Select
+	Select Case Int(Rnd*2)+1
+		Case 1 : DOF 160, 1
+		Case 2 : DOF 160, 0
+	End Select
+End Sub
+
+' *********************************************************************
+'                      Supporting Ball & Sound Functions
+' *********************************************************************
+
+Function AudioPan(TableObj)	'Calculates the pan for a TableObj based on the X position on the table. "table1" is the name of the table.  New AudioPan algorithm for accurate stereo pan positioning.
+    Dim tmp
+    If PFOption=1 Then tmp = TableObj.x * 2 / table1.width-1
+	If PFOption=2 Then tmp = TableObj.y * 2 / table1.height-1
+	If tmp < 0 Then
+		AudioPan = -((0.8745898957*(ABS(tmp)^12.78313661)) + (0.1264569796*(ABS(tmp)^1.000771219)))
+	Else
+		AudioPan = (0.8745898957*(ABS(tmp)^12.78313661)) + (0.1264569796*(ABS(tmp)^1.000771219))
+	End If
+End Function
+
+Function xGain(TableObj)
+'xGain algorithm calculates a PlaySound Volume parameter multiplier to provide a Constant Power "pan".
+'PFOption=1:  xGain = 1 at PF Left, xGain = 0.32931 (-3dB for PlaySound's volume parameter) at PF Center and xGain = 1 at PF Right.  Used for Left & Right stereo PF Speakers.
+'PFOption=2:  xGain = 1 at PF Top, xGain = 0.32931 (-3dB for PlaySound's volume parameter) at PF Center and xGain = 1 at PF Bottom.  Used for Top & Bottom stereo PF Speakers.
+	Dim tmp, PI
+    If PFOption=1 Then tmp = TableObj.x * 2 / table1.width-1
+	If PFOption=2 Then tmp = TableObj.y * 2 / table1.height-1
+	PI = 4 * ATN(1)
+	If tmp < 0 Then
+	xGain = 0.3293074856*EXP(-0.9652695455*tmp^3 - 2.452909811*tmp^2 - 2.597701999*tmp)
+	Else
+	xGain = 0.3293074856*EXP(-0.9652695455*-tmp^3 - 2.452909811*-tmp^2 - 2.597701999*-tmp)
+	End If
+End Function
+
+Function XVol(tableobj)
+'XVol algorithm calculates a PlaySound Volume parameter multiplier for a tableobj based on its X table position to provide a Constant Power "pan".
+'XVol = 1 at PF Left, XVol = 0.32931 (-3dB for PlaySound's volume parameter) at PF Center and XVol = 0 at PF Right
+Dim tmpx
+	If PFOption = 3 Then
+		tmpx = tableobj.x * 2 / table1.width-1
+		XVol = 0.3293074856*EXP(-0.9652695455*tmpx^3 - 2.452909811*tmpx^2 - 2.597701999*tmpx)
+	End If
+End Function
+
+Function YVol(tableobj)
+'YVol algorithm calculates a PlaySound Volume parameter multiplier for a tableobj based on its Y table position to provide a Constant Power "fade".
+'YVol = 1 at PF Top, YVol = 0.32931 (-3dB for PlaySound's volume parameter) at PF Center and YVol = 0 at PF Bottom
+Dim tmpy
+	If PFOption = 3 Then
+		tmpy = tableobj.y * 2 / table1.height-1
+		YVol = 0.3293074856*EXP(-0.9652695455*tmpy^3 - 2.452909811*tmpy^2 - 2.597701999*tmpy)
+	End If
+End Function
+
+'*********************************************************************************
+
+Function Vol(ball) ' Calculates the Volume of the sound based on the ball speed
+    Vol = Csng(BallVel(ball) ^2 / 2000)
+End Function
+
+Function Pitch(ball) ' Calculates the pitch of the sound based on the ball speed
+    Pitch = BallVel(ball) * 20
+End Function
+
+Function BallVel(ball) 'Calculates the ball speed
+    BallVel = INT(SQR((ball.VelX ^2) + (ball.VelY ^2) ) )
+End Function
+
+
+'*****************************************
+'      JP's VP10 Rolling Sounds - Modified
+'*****************************************
+
+'******************************************
+' Explanation of the rolling sound routine
+'******************************************
+
+' ball rolling sounds are played based on the ball speed and position
+' the routine checks first for deleted balls and stops the rolling sound.
+' The For loop goes through all the balls on the table and checks for the ball speed and
+' if the ball is on the table (height lower than 30) then then it plays the sound
+' otherwise the sound is stopped.
+
+'New algorithms added to make sounds for TopArch Hits, TopArch Rolls, ball bounces and glass hits.
+'For stereo, xGain is a Playsound volume multiplier that provides a Constant Power pan.
+'For quad, multiple PlaySound commands are launched together that are panned and faded to their maximum extents where PlaySound's PAN and FADE have the least error.
+'XVol and YVol are Playsound volume multipliers that provide a Constant Power "pan" and "fade".
+'Subtracting XVol or YVol from 1 yeilds an inverse response.
+
+Const tnob = 5 ' total number of balls
+
+'Change GHT, GHB and PFL values based upon the real pinball table dimensions.  Values are used by the GlassHit code.
+Const GHT = 2	'Glass height in inches at top of real playfield
+Const GHB = 2	'Glass height in inches at bottom of real playfield
+Const PFL = 40	'Real playfield lenght in inches
+
+ReDim rolling(tnob)
+InitRolling
+
+ReDim ArchRolling(tnob)
+InitArchRolling
+
+Dim ArchHit
+Sub LowerArch_Hit
+	LowerArch.hasHitEvent = False
+	ArchHit = 1
+	ArchTimer.Enabled = 1
+End Sub
+
+Dim archCount
+Sub ArchTimer_Timer
+	archCount = archCount + 1
+	If archCount = 2 Then
+		archCount = 0
+		LowerArch.hasHitEvent = True
+		ArchTimer.enabled = 0
+	End If
+End Sub
+
+Sub NotOnArch_Hit
+	ArchHit = 0
+End Sub
+
+Sub NotOnArch2_Hit
+	ArchHit = 0
+End Sub
+
+Sub InitRolling
+	Dim i
+	For i = 0 to tnob
+		rolling(i) = False
+	Next
+End Sub
+
+Sub InitArchRolling
+	Dim i
+	For i = 0 to tnob
+		ArchRolling(i) = False
+	Next
+End Sub
+
+Sub RollingTimer_Timer()
+	Dim BOT, b
+	BOT = GetBalls
+
+'TextBox1.text="BOT(b).Z  " & formatnumber(BOT(b).Z,1)
+'TextBox2.text="BOT(b).VelZ  " & formatnumber(BOT(b).VelZ,1)
+'TextBox3.text="GLASS  " & formatnumber((BOT(b).Y * ((GHT-GHB)/PFL)) + (GHB*50/1.0625) - (BallSize/2),1)
+
+
+	' stop the sound of deleted balls
+	For b = UBound(BOT) + 1 to tnob
+		rolling(b) = False
+		StopSound("BallrollingA" & b)
+		StopSound("BallrollingB" & b)
+		StopSound("BallrollingC" & b)
+		StopSound("BallrollingD" & b)
+	Next
+
+	' exit the sub if no balls on the table
+	If UBound(BOT) = -1 Then Exit Sub
+
+	' play the rolling sound for each ball
+	For b = 0 to UBound(BOT)
+
+'	Ball Rolling sounds
+	If PFOption = 1 or PFOption = 2 Then
+		If BallVel(BOT(b) ) > 1 AND BOT(b).z < 26 Then
+			rolling(b) = True
+			PlaySound("BallrollingA" & b), -1, Vol(BOT(b)) * 0.2 * xGain(BOT(b)), AudioPan(BOT(b)), 0, Pitch(BOT(b)), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		Else
+			If rolling(b) = True Then
+				StopSound("BallrollingA" & b)
+				rolling(b) = False
+			End If
+		End If
+
+'	Arch Hit and Arch Rolling sounds
+		If BallVel(BOT(b) ) > 1 AND ArchHit =1 Then
+			ArchRolling(b) = True
+			PlaySound("ArchHit" & b),   0, (BallVel(BOT(b))/20)^5 * 1 * xGain(BOT(b)), AudioPan(BOT(b)), 0, (BallVel(BOT(b))/40)^5, 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+			PlaySound("ArchRollA" & b), -1, (BallVel(BOT(b))/40)^5 * 1 * xGain(BOT(b)), AudioPan(BOT(b)), 0, (BallVel(BOT(b))/40)^5, 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		Else
+			If ArchRolling(b) = True Then
+			StopSound("ArchRollA" & b)
+			ArchRolling(b) = False
+			End If
+		End If
+
+'	Ball drop sounds - Four intensities of ball bounce sound files ranging from 1 to 4 bounces.  The number of bounces increase as the ball's downward Z velocity increases.
+'	A BOT(b).VelZ of zero will play the sound of trapped balls (balls trapped by table objects constantly micro-bounce against them).
+		If BOT(b).VelZ >= -3 And BOT(b).VelZ < -0.5 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop1" & b, 0, ABS(BOT(b).VelZ)/400 * xGain(BOT(b)), AudioPan(BOT(b)), 0, Pitch(BOT(b)), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		ElseIf BOT(b).VelZ >= -4 And BOT(b).VelZ < -3 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop2" & b, 0, ABS(BOT(b).VelZ)/400 * xGain(BOT(b)), AudioPan(BOT(b)), 0, Pitch(BOT(b)), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		ElseIf BOT(b).VelZ >= -5 And BOT(b).VelZ < -4 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop3" & b, 0, ABS(BOT(b).VelZ)/400 * xGain(BOT(b)), AudioPan(BOT(b)), 0, Pitch(BOT(b)), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		ElseIf BOT(b).VelZ < -5 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop4" & b, 0, ABS(BOT(b).VelZ)/400 * xGain(BOT(b)), AudioPan(BOT(b)), 0, Pitch(BOT(b)), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		End If
+
+'	Glass hit sounds
+'	Ball=50 units=1.0625".  Ball.z is ball center.  Balls are physically limited by Top Glass Height.  Max ball.z is 25 units below Top Glass Height.
+'	To ensure ball can go high enough to trigger glass hit, make Table Options/Dimensions & Slope/Top Glass Height equal to (GHT*50/1.0625) + 5
+		If BOT(b).Z > (BOT(b).Y * ((GHT-GHB)/PFL)) + (GHB*50/1.0625) - BallSize/2 And BallinPlay => 1 Then
+			PlaySound "GlassHit" & b, 0, ABS(BOT(b).VelZ)/30 * xGain(BOT(b)), AudioPan(BOT(b)), 0, Pitch(BOT(b)), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		End If
+	End If
+
+	If PFOption = 3 Then
+'	Ball Rolling sounds
+		If BallVel(BOT(b) ) > 1 AND BOT(b).z < 30 Then
+			rolling(b) = True
+			PlaySound("BallrollingA" & b), -1, Vol(BOT(b)) * 0.2 *    XVol(BOT(b))  *     YVol(BOT(b)), -1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Left PF Speaker
+			PlaySound("BallrollingB" & b), -1, Vol(BOT(b)) * 0.2 * (1-XVol(BOT(b))) *     YVol(BOT(b)),  1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Right PF Speaker
+			PlaySound("BallrollingC" & b), -1, Vol(BOT(b)) * 0.2 *    XVol(BOT(b))  * (1-YVol(BOT(b))), -1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound("BallrollingD" & b), -1, Vol(BOT(b)) * 0.2 * (1-XVol(BOT(b))) * (1-YVol(BOT(b))),  1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Right PF Speaker
+		Else
+			If rolling(b) = True Then
+				StopSound("BallrollingA" & b)		'Top Left PF Speaker
+				StopSound("BallrollingB" & b)		'Top Right PF Speaker
+				StopSound("BallrollingC" & b)		'Bottom Left PF Speaker
+				StopSound("BallrollingD" & b)		'Bottom Right PF Speaker
+				rolling(b) = False
+			End If
+		End If
+
+'	Arch Hit and Arch Rolling sounds
+		If BallVel(BOT(b) ) > 1 AND ArchHit =1 Then
+			ArchRolling(b) = True
+			PlaySound("ArchHit" & b),   0, (BallVel(BOT(b))/20)^5 * 1 *    XVol(BOT(b))  *     YVol(BOT(b)),  -1, 0, (BallVel(BOT(b))/40)^5, 1, 0, -1	'Top Left PF Speaker
+			PlaySound("ArchHit" & b),   0, (BallVel(BOT(b))/20)^5 * 1 * (1-XVol(BOT(b))) *     YVol(BOT(b)),   1, 0, (BallVel(BOT(b))/40)^5, 1, 0, -1	'Top Right PF Speaker
+			PlaySound("ArchHit" & b),   0, (BallVel(BOT(b))/20)^5 * 1 *    XVol(BOT(b))  *  (1-YVol(BOT(b))), -1, 0, (BallVel(BOT(b))/40)^5, 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound("ArchHit" & b),   0, (BallVel(BOT(b))/20)^5 * 1 * (1-XVol(BOT(b))) *  (1-YVol(BOT(b))),  1, 0, (BallVel(BOT(b))/40)^5, 1, 0,  1	'Bottom Right PF Speaker
+			PlaySound("ArchRollA" & b), -1, (BallVel(BOT(b))/40)^5 * 1 *    XVol(BOT(b))  *     YVol(BOT(b)),  -1, 0, (BallVel(BOT(b))/40)^5, 1, 0, -1	'Top Left PF Speaker
+			PlaySound("ArchRollB" & b), -1, (BallVel(BOT(b))/40)^5 * 1 * (1-XVol(BOT(b))) *     YVol(BOT(b)),   1, 0, (BallVel(BOT(b))/40)^5, 1, 0, -1	'Top Right PF Speaker
+			PlaySound("ArchRollC" & b), -1, (BallVel(BOT(b))/40)^5 * 1 *    XVol(BOT(b))  *  (1-YVol(BOT(b))), -1, 0, (BallVel(BOT(b))/40)^5, 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound("ArchRollD" & b), -1, (BallVel(BOT(b))/40)^5 * 1 * (1-XVol(BOT(b))) *  (1-YVol(BOT(b))),  1, 0, (BallVel(BOT(b))/40)^5, 1, 0,  1	'Bottom Right PF Speaker
+		Else
+			If ArchRolling(b) = True Then
+			StopSound("ArchRollA" & b)	'Top Left PF Speaker
+			StopSound("ArchRollB" & b)	'Top Right PF Speaker
+			StopSound("ArchRollC" & b)	'Bottom Left PF Speaker
+			StopSound("ArchRollD" & b)	'Bottom Right PF Speaker
+			ArchRolling(b) = False
+			End If
+		End If
+
+'	Ball drop sounds - Four intensities of ball bounce sound files ranging from 1 to 4 bounces.  The number of bounces increase as the ball's downward Z velocity increases.
+'	A BOT(b).VelZ of zero will play the sound of trapped balls (balls trapped by table objects constantly micro-bounce against them).
+		If BOT(b).VelZ >= -3 And BOT(b).VelZ < -0.5 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop1" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  *     YVol(BOT(b)), -1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Left PF Speaker
+			PlaySound "BallDrop1" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) *     YVol(BOT(b)),  1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Right PF Speaker
+			PlaySound "BallDrop1" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  * (1-YVol(BOT(b))), -1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound "BallDrop1" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) * (1-YVol(BOT(b))),  1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Right PF Speaker
+		ElseIf BOT(b).VelZ >= -4 And BOT(b).VelZ < -3 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop2" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  *     YVol(BOT(b)), -1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Left PF Speaker
+			PlaySound "BallDrop2" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) *     YVol(BOT(b)),  1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Right PF Speaker
+			PlaySound "BallDrop2" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  * (1-YVol(BOT(b))), -1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound "BallDrop2" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) * (1-YVol(BOT(b))),  1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Right PF Speaker
+		ElseIf BOT(b).VelZ >= -5 And BOT(b).VelZ < -4 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop3" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  *     YVol(BOT(b)), -1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Left PF Speaker
+			PlaySound "BallDrop3" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) *     YVol(BOT(b)),  1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Right PF Speaker
+			PlaySound "BallDrop3" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  * (1-YVol(BOT(b))), -1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound "BallDrop3" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) * (1-YVol(BOT(b))),  1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Right PF Speaker
+		ElseIf BOT(b).VelZ < -5 And BOT(b).Z < 55 And BOT(b).Z > 27 And BallinPlay => 1 Then
+			PlaySound "BallDrop4" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  *     YVol(BOT(b)), -1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Left PF Speaker
+			PlaySound "BallDrop4" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) *     YVol(BOT(b)),  1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Right PF Speaker
+			PlaySound "BallDrop4" & b, 0, ABS(BOT(b).VelZ)/400 *    XVol(BOT(b))  * (1-YVol(BOT(b))), -1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound "BallDrop4" & b, 0, ABS(BOT(b).VelZ)/400 * (1-XVol(BOT(b))) * (1-YVol(BOT(b))),  1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Right PF Speaker
+		End If
+
+'	Glass hit sounds
+'	Ball=50 units=1.0625".  Ball.z is ball center.  Balls are physically limited by Top Glass Height.  Max ball.z is 25 units below Top Glass Height.
+'	To ensure ball can go high enough to trigger, make Table Options/Dimensions & Slope/Top Glass Height equal to (GHT*50/1.0625) + 5
+		If BOT(b).Z > (BOT(b).Y * ((GHT-GHB)/PFL)) + (GHB*50/1.0625) - Ballsize/2 And BallinPlay => 1 Then
+			PlaySound "GlassHit" & b, 0, ABS(BOT(b).VelZ)/30 *    XVol(BOT(b))  *     YVol(BOT(b)), -1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Left PF Speaker
+			PlaySound "GlassHit" & b, 0, ABS(BOT(b).VelZ)/30 * (1-XVol(BOT(b))) *     YVol(BOT(b)),  1, 0, Pitch(BOT(b)), 1, 0, -1	'Top Right PF Speaker
+			PlaySound "GlassHit" & b, 0, ABS(BOT(b).VelZ)/30 *    XVol(BOT(b))  * (1-YVol(BOT(b))), -1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Left PF Speaker
+			PlaySound "GlassHit" & b, 0, ABS(BOT(b).VelZ)/30 * (1-XVol(BOT(b))) * (1-YVol(BOT(b))),  1, 0, Pitch(BOT(b)), 1, 0,  1	'Bottom Right PF Speaker
+		End If
+	End If
+	Next
+End Sub
+
+'*************Hit Sound Routines
+'Eliminated the Hit Subs extra velocity criteria since the PlayFieldSoundAB command already incorporates the ball’s velocity.
+
+Sub aRubberPins_Hit(idx)
+	PlayFieldSoundAB "pinhit_low", 0, 1
+End Sub
+
+Sub aTargets_Hit(idx)
+	PlayFieldSoundAB "target", 0, 1
+End Sub
+
+Sub aMetalsThin_Hit(idx)
+	PlayFieldSoundAB "metalhit_thin", 0, 1
+End Sub
+
+Sub aMetalsMedium_Hit(idx)
+	PlayFieldSoundAB "metalhit_medium", 0, 1
+End Sub
+
+Sub aMetals2_Hit(idx)
+	PlayFieldSoundAB "metalhit2", 0, 1
+End Sub
+
+Sub aGates_Hit(idx)
+	PlayFieldSoundAB "gate4", 0, 1
+End Sub
+
+Sub aRubberBands_Hit(idx)
+	If BallinPlay > 0 Then	'Eliminates the thump of Trough Ball Creation balls hitting walls 9 and 14 during table initiation
+	PlayFieldSoundAB "fx_rubber2", 0, 0.1
+	End If
+End Sub
+
+Sub aRubberWheel_hit
+	PlayFieldSoundAB "fx_rubber2", 0, 0.5
+End sub
+
+Sub aPosts_Hit(idx)
+	PlayFieldSoundAB "fx_rubber2", 0, 1
+End Sub
+
+Sub LeftFlipper_Collide(parm)
+ 	RandomSoundFlipper()
+End Sub
+
+Sub RightFlipper_Collide(parm)
+ 	RandomSoundFlipper()
+End Sub
+
+Sub LeftFlipper_Collide(parm)
+ 	RandomSoundFlipper()
+End Sub
+
+Sub RightFlipper_Collide(parm)
+ 	RandomSoundFlipper()
+End Sub
+
+Sub RandomSoundFlipper()
+	Select Case Int(Rnd*3)+1
+		Case 1 : PlayFieldSoundAB "flip_hit_1", 0, 1
+		Case 2 : PlayFieldSoundAB "flip_hit_2", 0, 1
+		Case 3 : PlayFieldSoundAB "flip_hit_3", 0, 1
+	End Select
+End Sub
+
+Sub ApronWalls_Hit(index)
+	textbox1.text = "Hit"
+	If PFOption = 1 Or PFOption = 2 Then
+		ApronWalls.Threshold = 0
+		PlaySound "ApronHit1st", 0, 60 * Vol(ActiveBall) * xGain(ActiveBall), AudioPan(ActiveBall), 0, Pitch(ActiveBall), 1, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		ApronWalls.Threshold = 2
+		PlaySound "ApronHit2nd", 0, 60 * Vol(ActiveBall) * xGain(ActiveBall), AudioPan(ActiveBall), 0, Pitch(ActiveBall), 0, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		ApronWalls.Threshold = 0
+	End If
+	If PFOption = 3 Then
+		ApronWalls.Threshold = 0
+		PlaySound "ApronHit1st", 0, 60 * Vol(ActiveBall) *    XVol(ActiveBall)  *    YVol(ActiveBall),  -1, 0, Pitch(ActiveBall), 1, 0, -1	'Top Left PF Speaker
+		PlaySound "ApronHit1st", 0, 60 * Vol(ActiveBall) * (1-XVol(ActiveBall)) *    YVol(ActiveBall),   1, 0, Pitch(ActiveBall), 1, 0, -1	'Top Right PF Speaker
+		PlaySound "ApronHit1st", 0, 60 * Vol(ActiveBall) *    XVol(ActiveBall)  * (1-YVol(ActiveBall)), -1, 0, Pitch(ActiveBall), 1, 0,  1	'Bottom Left PF Speaker
+		PlaySound "ApronHit1st", 0, 60 * Vol(ActiveBall) * (1-XVol(ActiveBall)) * (1-YVol(ActiveBall)),  1, 0, Pitch(ActiveBall), 1, 0,  1	'Bottom Right PF Speaker
+		ApronWalls.Threshold = 2
+		PlaySound "ApronHit2nd", 0, 60 * Vol(ActiveBall) *    XVol(ActiveBall)  *    YVol(ActiveBall),  -1, 0, Pitch(ActiveBall), 0, 0, -1	'Top Left PF Speaker
+		PlaySound "ApronHit2nd", 0, 60 * Vol(ActiveBall) * (1-XVol(ActiveBall)) *    YVol(ActiveBall),   1, 0, Pitch(ActiveBall), 0, 0, -1	'Top Right PF Speaker
+		PlaySound "ApronHit2nd", 0, 60 * Vol(ActiveBall) *    XVol(ActiveBall)  * (1-YVol(ActiveBall)), -1, 0, Pitch(ActiveBall), 0, 0,  1	'Bottom Left PF Speaker
+		PlaySound "ApronHit2nd", 0, 60 * Vol(ActiveBall) * (1-XVol(ActiveBall)) * (1-YVol(ActiveBall)),  1, 0, Pitch(ActiveBall), 0, 0,  1	'Bottom Right PF Speaker
+		ApronWalls.Threshold = 0
+	End If
+End Sub
+
+'**********************
+' Ball Collision Sound
+'**********************
+
+'**************************************
+' Explanation of the collision routine
+'**************************************
+
+' The collision is built in VP.
+' You only need to add a Sub OnBallBallCollision(ball1, ball2, velocity) and when two balls collide they
+' will call this routine.
+
+'New algorithm for BallBallCollision
+'For stereo, xGain is a Playsound volume multiplier that provides a Constant Power pan.
+'For quad, multiple PlaySound commands are launched together that are panned and faded to their maximum extents where PlaySound's PAN and FADE have the least error.
+'XVol and YVol are Playsound volume multipliers that provide a Constant Power "pan" and "fade".
+'Subtracting XVol or YVol from 1 yeilds an inverse response.
+
+Sub OnBallBallCollision(ball1, ball2, velocity)
+	If PFOption = 1 or PFOption = 2 Then
+		PlaySound "BBcollide", 0, (Csng(velocity) ^2 / 2000) * xGain(ball1), AudioPan(ball1), 0, Pitch(ball1), 0, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+	End If
+	If PFOption = 3 Then
+		PlaySound "BBcollide", 0, (Csng(velocity) ^2 / 2000) *    XVol(ball1)  *    YVol(ball1),  -1, 0, Pitch(ball1), 0, 0, -1	'Top Left Playfield Speaker
+		PlaySound "BBcollide", 0, (Csng(velocity) ^2 / 2000) * (1-XVol(ball1)) *    YVol(ball1),   1, 0, Pitch(ball1), 0, 0, -1	'Top Right Playfield Speaker
+		PlaySound "BBcollide", 0, (Csng(velocity) ^2 / 2000) *    XVol(ball1)  * (1-YVol(ball1)), -1, 0, Pitch(ball1), 0, 0,  1	'Bottom Left Playfield Speaker
+		PlaySound "BBcollide", 0, (Csng(velocity) ^2 / 2000) * (1-XVol(ball1)) * (1-YVol(ball1)),  1, 0, Pitch(ball1), 0, 0,  1	'Bottom Right Playfield Speaker
+	End If
+End Sub
+
+Sub PlayFieldSound (SoundName, Looper, TableObject, VolMult)
+'Plays the sound of a table object at the table object's coordinates.
+'For stereo, xGain is a Playsound volume multiplier that provides a Constant Power pan.
+'For quad, multiple PlaySound commands are launched together that are panned and faded to their maximum extents where PlaySound's PAN and FADE have the least error.
+'XVol and YVol are Playsound volume multipliers that provide a Constant Power "pan" and "fade".
+'Subtracting XVol or YVol from 1 yeilds an inverse response.
+
+	If PFOption = 1 Or PFOption = 2 Then
+		If Looper = -1 Then
+			PlaySound SoundName&"A", Looper, VolMult * xGain(TableObject), AudioPan(TableObject), 0, 0, 0, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		End If
+		If Looper = 0 Then
+			PlaySound SoundName, Looper, VolMult * xGain(TableObject), AudioPan(TableObject), 0, 0, 0, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+		End If
+	End If
+	If PFOption = 3 Then
+		If Looper = -1 Then
+			PlaySound SoundName&"A", Looper, VolMult *    XVol(TableObject)  *    YVol(TableObject),  -1, 0, 0, 0, 0, -1	'Top Left PF Speaker
+			PlaySound SoundName&"B", Looper, VolMult * (1-XVol(TableObject)) *    YVol(TableObject),   1, 0, 0, 0, 0, -1	'Top Right PF Speaker
+			PlaySound SoundName&"C", Looper, VolMult *    XVol(TableObject)  * (1-YVol(TableObject)), -1, 0, 0, 0, 0,  1	'Bottom Left PF Speaker
+			PlaySound SoundName&"D", Looper, VolMult * (1-XVol(TableObject)) * (1-YVol(TableObject)),  1, 0, 0, 0, 0,  1	'Bottom Right PF Speaker
+		End If
+		If Looper = 0 Then
+			PlaySound SoundName, Looper, VolMult *    XVol(TableObject)  *    YVol(TableObject),  -1, 0, 0, 0, 0, -1	'Top Left PF Speaker
+			PlaySound SoundName, Looper, VolMult * (1-XVol(TableObject)) *    YVol(TableObject),   1, 0, 0, 0, 0, -1	'Top Right PF Speaker
+			PlaySound SoundName, Looper, VolMult *    XVol(TableObject)  * (1-YVol(TableObject)), -1, 0, 0, 0, 0,  1	'Bottom Left PF Speaker
+			PlaySound SoundName, Looper, VolMult * (1-XVol(TableObject)) * (1-YVol(TableObject)),  1, 0, 0, 0, 0,  1	'Bottom Right PF Speaker
+		End If
+	End If
+End Sub
+
+Sub PlayFieldSoundAB (SoundName, Looper, VolMult)
+'Plays the sound of a table object at the Active Ball's location.
+'For stereo, xGain is a Playsound volume multiplier that provides a Constant Power pan.
+'For quad, multiple PlaySound commands are launched together that are panned and faded to their maximum extents where PlaySound's PAN and FADE have the least error.
+'XVol and YVol are Playsound volume multipliers that provide a Constant Power "pan" and "fade".
+'Subtracting XVol or YVol from 1 yeilds an inverse response.
+
+	If PFOption = 1 Or PFOption = 2 Then
+		PlaySound SoundName, Looper, VolMult * Vol(ActiveBall) * xGain(ActiveBall), AudioPan(ActiveBall), 0, Pitch(ActiveBall), 0, 0, 0	'Left & Right stereo or Top & Bottom stereo PF Speakers.
+	End If
+	If PFOption = 3 Then
+		PlaySound SoundName, Looper, VolMult * Vol(ActiveBall) *    XVol(ActiveBall)  *    YVol(ActiveBall),  -1, 0, Pitch(ActiveBall), 0, 0, -1	'Top Left PF Speaker
+		PlaySound SoundName, Looper, VolMult * Vol(ActiveBall) * (1-XVol(ActiveBall)) *    YVol(ActiveBall),   1, 0, Pitch(ActiveBall), 0, 0, -1	'Top Right PF Speaker
+		PlaySound SoundName, Looper, VolMult * Vol(ActiveBall) *    XVol(ActiveBall)  * (1-YVol(ActiveBall)), -1, 0, Pitch(ActiveBall), 0, 0,  1	'Bottom Left PF Speaker
+		PlaySound SoundName, Looper, VolMult * Vol(ActiveBall) * (1-XVol(ActiveBall)) * (1-YVol(ActiveBall)),  1, 0, Pitch(ActiveBall), 0, 0,  1	'Bottom Right PF Speaker
+	End If
+End Sub
+
+'******************************************************
+'				FLIPPER AND RUBBER CORRECTION
+'******************************************************
+dim LFPress, RFPress, EOST, EOSA, EOSTnew, EOSaNew
+dim FStrength, FRampUp, fElasticity, EOSRampUp, SOSRampUp
+dim RFEndAngle, LFEndAngle, LFCount, RFCount, LiveCatch
+
+LFEndAngle = Leftflipper.EndAngle
+RFEndAngle = RightFlipper.EndAngle
+
+EOST = leftflipper.eosTorque   			'End of Swing Torque
+EOSA = leftflipper.eosTorqueAngle		'End of Swing Torque Angle
+fStrength = LeftFlipper.strength		'Flipper Strength
+fRampUp = LeftFlipper.RampUp			'Flipper Ramp Up
+fElasticity = LeftFlipper.elasticity	'Flipper Elasticity
+EOStNew = 1.0 		'new Flipper Torque
+EOSaNew = 0.2		'new FLipper Tprque Angle
+EOSRampUp = 1.5		'new EOS Ramp Up weaker at EOS because of the weaker holding coil
+SOSRampUp = 8.5 	'new SOS Ramp Up strong at start because of the stronger starting coil
+LiveCatch = 8		'variable to check elapsed time from
+
+'********Need to have a flipper timer to check for these values
+
+Sub flipperTimer_Timer
+    Dim BOT, b
+    BOT = GetBalls
+'	For b = 0 to UBound(BOT)
+'		BOT(0).color = vbgreen
+'		If b > 0 then BOT(1).color = vbred
+'		If b > 1 Then BOT(2).color = vbblue
+'		tb.text = "x = " & BOT(0).x
+'		tb1.text = "y = " & BOT(0).y
+'		tb.text = formatnumber(BOT(b).AngMomY,1)
+'		tb.text = "AngMomX = " & formatnumber(BOT(b).AngMomX,1)
+'		tb1.text = "AngMomY = " & formatnumber(BOT(b).AngMomY,1)
+'		tb2.text = "AngMMomZ = " & formatnumber(BOT(b).AngMomZ,1)
+
+'	Next
+
+'	lFlip.rotz = leftflipper.CurrentAngle -121 'silver metal flipper obj
+'	lFlipR.rotz = leftflipper.CurrentAngle -121
+'	rFlip.rotz = RightFlipper.CurrentAngle +121
+'	rFlipR.rotz = RightFlipper.CurrentAngle +121
+
+
+	FlipperLSh.RotZ = LeftFlipper.CurrentAngle
+	FlipperRSh.RotZ = RightFlipper.CurrentAngle
+
+
+
+	'--------------Flipper Tricks Section
+	'What this code does is swing the flipper fast and make the flipper soft near its EOS to enable live catches.  It resets back to the base Table
+	'settings once the flipper reaches the end of swing.  The code also makes the flipper starting ramp up high to simulate the stronger starting
+	'coil strength and weaker at its EOS to simulate the weaker hold coil.
+
+	If LeftFlipper.CurrentAngle = LeftFlipper.EndAngle and LFPress = 1 Then 	'If the flipper is fully swung and the flipper button is pressed then...
+		LeftFlipper.eosTorqueAngle = EOSaNew	'sets flipper EOS Torque Angle to .2
+		LeftFlipper.eosTorque = EOStNew			'sets flipper EOS Torque to 1
+		LeftFlipper.RampUp = EOSRampUp			'sets flipper ramp up to 1.5
+		If LFCount = 0 Then LFCount = GameTime	'sets the variable LFCount = to the elapsed game time
+		If GameTime - LFCount < LiveCatch Then	'if less than 8ms have elasped then we are in a "Live Catch" scenario
+			LeftFlipper.Elasticity = 0.1		'sets flipper elasticity WAY DOWN to allow Live Catches
+			If LeftFlipper.EndAngle <> LFEndAngle Then LeftFlipper.EndAngle = LFEndAngle	'Keep the flipper at its EOS and don't let it deflect
+		Else
+			LeftFlipper.Elasticity = fElasticity	'reset flipper elasticity to the base table setting
+		End If
+	Elseif LeftFlipper.CurrentAngle > LeftFlipper.startangle - 0.05  Then 	'If the flipper has started its swing, make it swing fast to nearly the end...
+		LeftFlipper.RampUp = SOSRampUp				'set flipper Ramp Up high
+		LeftFlipper.EndAngle = LFEndAngle - 3		'swing to within 3 degrees of EOS
+		LeftFlipper.Elasticity = fElasticity		'Set the elasticity to the base table elasticity
+		LFCount = 0
+	Elseif LeftFlipper.CurrentAngle > LeftFlipper.EndAngle + 0.01 Then  'If the flipper has swung past it's end of swing then...
+		LeftFlipper.eosTorque = EOST			'set the flipper EOS Torque back to the base table setting
+		LeftFlipper.eosTorqueAngle = EOSA		'set the flipper EOS Torque Angle back to the base table setting
+		LeftFlipper.RampUp = fRampUp			'set the flipper Ramp Up back to the base table setting
+		LeftFlipper.Elasticity = fElasticity	'set the flipper Elasticity back to the base table setting
+	End If
+
+	If RightFlipper.CurrentAngle = RightFlipper.EndAngle and RFPress = 1 Then
+		RightFlipper.eosTorqueAngle = EOSaNew
+		RightFlipper.eosTorque = EOStNew
+		RightFlipper.RampUp = EOSRampUp
+		If RFCount = 0 Then RFCount = GameTime
+		If GameTime - RFCount < LiveCatch Then
+			RightFlipper.Elasticity = 0.1
+			If RightFlipper.EndAngle <> RFEndAngle Then RightFlipper.EndAngle = RFEndAngle
+		Else
+			RightFlipper.Elasticity = fElasticity
+		End If
+	Elseif RightFlipper.CurrentAngle < RightFlipper.StartAngle + 0.05 Then
+		RightFlipper.RampUp = SOSRampUp
+		RightFlipper.EndAngle = RFEndAngle + 3
+		RightFlipper.Elasticity = fElasticity
+		RFCount = 0
+	Elseif RightFlipper.CurrentAngle < RightFlipper.EndAngle - 0.01 Then
+		RightFlipper.eosTorque = EOST
+		RightFlipper.eosTorqueAngle = EOSA
+		RightFlipper.RampUp = fRampUp
+		RightFlipper.Elasticity = fElasticity
+	End If
+
+End Sub
+
+dim LF : Set LF = New FlipperPolarity
+dim RF : Set RF = New FlipperPolarity
+
+
+InitPolarity
+
+Sub InitPolarity()
+	dim x, a : a = Array(LF, RF)
+	for each x in a
+		'safety coefficient (diminishes polarity correction only)
+		x.AddPoint "Ycoef", 0, RightFlipper.Y-65, 1	'disabled
+		x.AddPoint "Ycoef", 1, RightFlipper.Y-11, 1
+
+		x.enabled = True
+		x.TimeDelay = 69    '*****Important, this variable is an offset for the speed that the ball travels down the table to determine if the flippers have been fired
+							'This is needed because the corrections to ball trajectory should only applied if the flippers have been fired and the ball is in the trigger zones.
+							'FlipAT is set to GameTime when the ball enters the flipper trigger zones and if GameTime is less than FlipAT + this time delay then changes to velocity
+							'and trajectory are applied.  If the flipper is fired before the ball enters the trigger zone then with this delay added to FlipAT the changes
+							'to tragectory and velocity will not be applied.  Also if the flipper is in the final 20 degrees changes to ball values will also not be applied.
+							'"Faster" tables will need a smaller value while "slower" tables will need a larger value to give the ball more time to get to the flipper.
+							'If this value is not set high enough the Flipper Velocity and Polarity corrections will NEVER be applied.
+	Next
+
+	'rf.report "Polarity"
+	AddPt "Polarity", 0, 0, -2.7
+	AddPt "Polarity", 1, 0.16, -2.7
+	AddPt "Polarity", 2, 0.33, -2.7
+	AddPt "Polarity", 3, 0.37, -2.7	'4.2
+	AddPt "Polarity", 4, 0.41, -2.7
+	AddPt "Polarity", 5, 0.45, -2.7 '4.2
+	AddPt "Polarity", 6, 0.576,-2.7
+	AddPt "Polarity", 7, 0.66, -1.8'-2.1896
+	AddPt "Polarity", 8, 0.743, -0.5
+	AddPt "Polarity", 9, 0.81, -0.5
+	AddPt "Polarity", 10, 0.88, 0
+
+	'"Velocity" Profile
+	addpt "Velocity", 0, 0, 	1
+	addpt "Velocity", 1, 0.16, 1.06
+	addpt "Velocity", 2, 0.41, 	1.05
+	addpt "Velocity", 3, 0.53, 	1'0.982
+	addpt "Velocity", 4, 0.702, 0.968
+	addpt "Velocity", 5, 0.95,  0.968
+	addpt "Velocity", 6, 1.03, 	0.945
+
+	LF.Object = LeftFlipper
+	LF.EndPoint = EndPointLp	'you can use just a coordinate, or an object with a .x property. Using a couple of simple primitive objects
+	RF.Object = RightFlipper
+	RF.EndPoint = EndPointRp
+End Sub
+
+Sub AddPt(aStr, idx, aX, aY)	'debugger wrapper for adjusting flipper script in-game
+	dim a : a = Array(LF, RF)
+	dim x : for each x in a
+		x.addpoint aStr, idx, aX, aY
+	Next
+End Sub
+
+
+Sub TriggerLF_Hit() : LF.Addball activeball : End Sub
+Sub TriggerLF_UnHit() :  LF.PolarityCorrect activeball : End Sub
+Sub TriggerRF_Hit() : RF.Addball activeball : End Sub
+Sub TriggerRF_UnHit() : RF.PolarityCorrect activeball : End Sub
+Sub TriggerLF1_Hit() : LF.Addball activeball : End Sub
+Sub TriggerLF1_UnHit() :  LF.PolarityCorrect activeball : End Sub
+Sub TriggerRF1_Hit() : RF.Addball activeball : End Sub
+Sub TriggerRF1_UnHit() : RF.PolarityCorrect activeball : End Sub
+
+'Methods:
+'.TimeDelay - Delay before trigger shuts off automatically. Default = 80 (ms)
+'.AddPoint - "Polarity", "Velocity", "Ycoef" coordinate points. Use one of these 3 strings, keep coordinates sequential. x = %position on the flipper, y = output
+'.Object - set to flipper reference. Optional.
+'.StartPoint - set start point coord. Unnecessary, if .object is used.
+
+'Called with flipper -
+'ProcessBalls - catches ball data.
+' - OR -
+'.Fire - fires flipper.rotatetoend automatically + processballs. Requires .Object to be set to the flipper.
+
+'***************This is flipperPolarity's addPoint Sub
+Class FlipperPolarity
+	Public Enabled
+	Private FlipAt	'Timer variable (IE 'flip at 723,530ms...)
+	Public TimeDelay	'delay before trigger turns off and polarity is disabled TODO set time!
+	private Flipper, FlipperStart, FlipperEnd, LR, PartialFlipCoef
+	Private Balls(20), balldata(20)
+
+	dim PolarityIn, PolarityOut
+	dim VelocityIn, VelocityOut
+	dim YcoefIn, YcoefOut
+
+	Public Sub Class_Initialize
+		redim PolarityIn(0) : redim PolarityOut(0) : redim VelocityIn(0) : redim VelocityOut(0) : redim YcoefIn(0) : redim YcoefOut(0)
+		Enabled = True: TimeDelay = 50 : LR = 1:  dim x : for x = 0 to uBound(balls) : balls(x) = Empty : set Balldata(x) = new spoofBall: next
+	End Sub
+
+	Public Property let Object(aInput) : Set Flipper = aInput : StartPoint = Flipper.x : End Property
+	Public Property Let StartPoint(aInput) : if IsObject(aInput) then FlipperStart = aInput.x else FlipperStart = aInput : end if : End Property
+	Public Property Get StartPoint : StartPoint = FlipperStart : End Property
+	Public Property Let EndPoint(aInput) : if IsObject(aInput) then FlipperEnd = aInput.x else FlipperEnd = aInput : end if : End Property
+	Public Property Get EndPoint : EndPoint = FlipperEnd : End Property
+
+	Public Sub AddPoint(aChooseArray, aIDX, aX, aY) 'Index #, X position, (in) y Position (out)
+		Select Case aChooseArray
+			case "Polarity" : ShuffleArrays PolarityIn, PolarityOut, 1 : PolarityIn(aIDX) = aX : PolarityOut(aIDX) = aY : ShuffleArrays PolarityIn, PolarityOut, 0
+			Case "Velocity" : ShuffleArrays VelocityIn, VelocityOut, 1 :VelocityIn(aIDX) = aX : VelocityOut(aIDX) = aY : ShuffleArrays VelocityIn, VelocityOut, 0
+			Case "Ycoef" : ShuffleArrays YcoefIn, YcoefOut, 1 :YcoefIn(aIDX) = aX : YcoefOut(aIDX) = aY : ShuffleArrays YcoefIn, YcoefOut, 0
+		End Select
+
+	End Sub
+
+'********Triggered by a ball hitting the flipper trigger area
+	Public Sub AddBall(aBall) : dim x :
+		for x = 0 to uBound(balls)
+			if IsEmpty(balls(x)) then set balls(x) = aBall : exit sub :end if
+		Next
+	End Sub
+
+	Private Sub RemoveBall(aBall)
+		dim x : for x = 0 to uBound(balls)
+			if TypeName(balls(x) ) = "IBall" then
+				if aBall.ID = Balls(x).ID Then
+					balls(x) = Empty
+					Balldata(x).Reset
+				End If
+			End If
+		Next
+	End Sub
+
+'*********Used to rotate flipper since this is removed from the key down for the flippers
+	Public Sub Fire()
+		Flipper.RotateToEnd
+		processballs
+	End Sub
+
+	Public Sub ProcessBalls() 'save data of balls in flipper range
+		FlipAt = GameTime
+		dim x : for x = 0 to uBound(balls)
+			if not IsEmpty(balls(x) ) then balldata(x).Data = balls(x)
+		Next
+		PartialFlipCoef = ((Flipper.StartAngle - Flipper.CurrentAngle) / (Flipper.StartAngle - Flipper.EndAngle))  '% of flipper swing
+		PartialFlipCoef = abs(PartialFlipCoef-1)
+		if abs(Flipper.CurrentAngle - Flipper.EndAngle) < 20 Then 'last 20 degrees of swing is not dealt with
+			PartialFlipCoef = 0
+		End If
+'		tb.text = FlipAT
+	End Sub
+
+'***********gameTime is a global variable of how long the game has progressed in ms
+'***********This function lets the table know if the flipper has been fired
+	Private Function FlipperOn()
+'		TB.text = gameTime & ":" & (FlipAT + TimeDelay) ' ******MOVE TB into view WHEN THIS FLIPPER FUNCTIONALITY IS ADDED TO A NEW TABLE TO CHECK IF THE TIME DELAY IS LONG ENOUGH*****
+		if gameTime < FlipAt + TimeDelay then FlipperOn = True
+	End Function	'Timer shutoff for polaritycorrect
+
+'***********This is turned on when a ball leaves the flipper trigger area
+	Public Sub PolarityCorrect(aBall)
+		if FlipperOn() then 'don't run this if the flippers are at rest
+			dim tmp, BallPos, x, IDX, Ycoef : Ycoef = 1
+			dim teststr : teststr = "Cutoff"
+			tmp = PSlope(aBall.x, FlipperStart, 0, FlipperEnd, 1)
+			if tmp < 0.1 then 'if real ball position is behind flipper, exit Sub to prevent stucks	'Disabled 1.03, I think it's the Mesh that's causing stucks, not this
+			end if
+
+			'y safety Exit
+			if aBall.VelY > -8 then 'if ball going down then remove the ball
+				RemoveBall aBall
+				exit Sub
+			end if
+			'Find balldata. BallPos = % on Flipper
+			for x = 0 to uBound(Balls)
+				if aBall.id = BallData(x).id AND not isempty(BallData(x).id) then
+					idx = x
+					BallPos = PSlope(BallData(x).x, FlipperStart, 0, FlipperEnd, 1)
+					if ballpos > 0.65 then  Ycoef = LinearEnvelope(BallData(x).Y, YcoefIn, YcoefOut)				'find safety coefficient 'ycoef' data
+				end if
+			Next
+
+			'Velocity correction
+			if not IsEmpty(VelocityIn(0) ) then
+'				tb.text = "Vel corr"
+				Dim VelCoef
+				if IsEmpty(BallData(idx).id) and aBall.VelY < -12 then 'if tip hit with no collected data, do vel correction anyway
+					if PSlope(aBall.x, FlipperStart, 0, FlipperEnd, 1) > 1.1 then 'adjust plz
+						VelCoef = LinearEnvelope(5, VelocityIn, VelocityOut)
+						if partialflipcoef < 1 then VelCoef = PSlope(partialflipcoef, 0, 1, 1, VelCoef)
+						if Enabled then aBall.Velx = aBall.Velx*VelCoef'VelCoef
+						if Enabled then aBall.Vely = aBall.Vely*VelCoef'VelCoef
+					end if
+				Else
+		 : 			VelCoef = LinearEnvelope(BallPos, VelocityIn, VelocityOut)
+					if Enabled then aBall.Velx = aBall.Velx*VelCoef
+					if Enabled then aBall.Vely = aBall.Vely*VelCoef
+				end if
+			End If
+
+			'Polarity Correction (optional now)
+			if not IsEmpty(PolarityIn(0) ) then
+				If StartPoint > EndPoint then LR = -1	'Reverse polarity if left flipper
+				dim AddX : AddX = LinearEnvelope(BallPos, PolarityIn, PolarityOut) * LR
+				if Enabled then aBall.VelX = aBall.VelX + 1 * (AddX*ycoef*PartialFlipcoef)
+			End If
+		End If
+		RemoveBall aBall
+	End Sub
+End Class
+
+'================================
+'Helper Functions
+
+
+Sub ShuffleArray(ByRef aArray, byVal offset) 'shuffle 1d array
+	dim x, aCount : aCount = 0
+	redim a(uBound(aArray) )
+	for x = 0 to uBound(aArray)	'Shuffle objects in a temp array
+		if not IsEmpty(aArray(x) ) Then
+			if IsObject(aArray(x)) then
+				Set a(aCount) = aArray(x) 'Set creates an object in VB
+			Else
+				a(aCount) = aArray(x)
+			End If
+			aCount = aCount + 1
+		End If
+	Next
+	if offset < 0 then offset = 0
+	redim aArray(aCount-1+offset)	'Resize original array
+	for x = 0 to aCount-1		'set objects back into original array
+		if IsObject(a(x)) then
+			Set aArray(x) = a(x)
+		Else
+			aArray(x) = a(x)
+		End If
+	Next
+End Sub
+
+'**********Takes in more than one array and passes them to ShuffleArray
+Sub ShuffleArrays(aArray1, aArray2, offset)
+	ShuffleArray aArray1, offset
+	ShuffleArray aArray2, offset
+End Sub
+
+'**********Calculate ball speed as hypotenuse of velX/velY triangle
+Function BallSpeed(ball) 'Calculates the ball speed
+    BallSpeed = SQR(ball.VelX^2 + ball.VelY^2 + ball.VelZ^2)
+End Function
+
+'**********Calculates the value of Y for an input x using the slope intercept equation
+Function PSlope(Input, X1, Y1, X2, Y2)	'Set up line via two points, no clamping. Input X, output Y
+	dim x, y, b, m : x = input : m = (Y2 - Y1) / (X2 - X1) : b = Y2 - m*X2
+	Y = M*x+b
+	PSlope = Y
+End Function
+
+Class spoofball
+	Public X, Y, Z, VelX, VelY, VelZ, ID, Mass, Radius
+	Public Property Let Data(aBall)
+		With aBall
+			x = .x : y = .y : z = .z : velx = .velx : vely = .vely : velz = .velz
+			id = .ID : mass = .mass : radius = .radius
+		end with
+	End Property
+	Public Sub Reset()
+		x = Empty : y = Empty : z = Empty  : velx = Empty : vely = Empty : velz = Empty
+		id = Empty : mass = Empty : radius = Empty
+	End Sub
+End Class
+
+'****************************************************************************
+'PHYSICS DAMPENERS
+
+'These are data mined bounce curves,
+'dialed in with the in-game elasticity as much as possible to prevent angle / spin issues.
+'Requires tracking ballspeed to calculate COR
+
+
+Sub dPosts_Hit(idx)
+	RubbersD.dampen Activeball
+End Sub
+
+Sub dSleeves_Hit(idx)
+	SleevesD.Dampen Activeball
+End Sub
+
+'*********This sets up the rubbers:
+dim RubbersD
+Set RubbersD = new Dampener  'Makes a Dampener Class Object
+RubbersD.name = "Rubbers"
+
+'cor bounce curve (linear)
+'for best results, try to match in-game velocity as closely as possible to the desired curve
+RubbersD.addpoint 0, 0, 0.935 '0.96	'point# (keep sequential), ballspeed, CoR (elasticity)
+RubbersD.addpoint 1, 3.77, 0.935 '0.96
+RubbersD.addpoint 2, 5.76, 0.942 '0.967	'dont take this as gospel. if you can data mine rubber elasticitiy, please help!
+RubbersD.addpoint 3, 15.84, 0.874
+RubbersD.addpoint 4, 56, 0.64	'there's clamping so interpolate up to 56 at least
+
+dim SleevesD : Set SleevesD = new Dampener	'this is just rubber but cut down to 85%...
+SleevesD.name = "Sleeves"
+SleevesD.CopyCoef RubbersD, 0.85
+
+'**********Class for dampener section of nfozzy's code
+Class Dampener
+	Public Print, debugOn 'tbpOut.text
+	public name, Threshold 	'Minimum threshold. Useful for Flippers, which don't have a hit threshold.
+	Public ModIn, ModOut
+	Private Sub Class_Initialize : redim ModIn(0) : redim Modout(0): End Sub
+
+	Public Sub AddPoint(aIdx, aX, aY)
+		ShuffleArrays ModIn, ModOut, 1 : ModIn(aIDX) = aX : ModOut(aIDX) = aY : ShuffleArrays ModIn, ModOut, 0
+	End Sub
+
+	public sub Dampen(aBall)
+		if threshold then if BallSpeed(aBall) < threshold then exit sub end if end if
+		dim RealCOR, DesiredCOR, str, coef
+'               Uses the LinearEnvelope function to calculate the correction based upon where it's value sits in relation
+
+'               to the addpoint parameters set above.  Basically interpolates values between set points in a linear fashion
+		DesiredCor = LinearEnvelope(cor.ballvel(aBall.id), ModIn, ModOut )
+
+'                Uses the function BallSpeed's value at the point of impact/the active ball's velocity which is constantly being updated
+'               RealCor is always less than 1
+		RealCOR = BallSpeed(aBall) / cor.ballvel(aBall.id)
+
+'               Divides the desired CoR by the real COR to make a multiplier to correct velocity in x and y
+		coef = desiredcor / realcor
+
+'		TB.text = coef
+
+'               Applies the coef to x and y velocities
+		aBall.velx = aBall.velx * coef : aBall.vely = aBall.vely * coef
+	End Sub
+
+'***********This Sub sets the values for Sleeves (or any other future objects) to 85% (or whatever is passed in) of Posts
+	Public Sub CopyCoef(aObj, aCoef) 'alternative addpoints, copy with coef
+		dim x : for x = 0 to uBound(aObj.ModIn)
+			addpoint x, aObj.ModIn(x), aObj.ModOut(x)*aCoef
+		Next
+	End Sub
+End Class
+
+'*****************************Generates cor.ballVel for dampener
+Sub RDampen_Timer() ' 1 ms timer always on
+	CoR.Update
+End Sub
+
+'*********CoR is Coefficient of Restitution defined as "how much of the kinetic energy remains for the objects
+'to rebound from one another vs. how much is lost as heat, or work done deforming the objects
+dim cor : set cor = New CoRTracker
+
+Class CoRTracker
+
+	public ballvel
+
+	Private Sub Class_Initialize : redim ballvel(0) : End Sub
+
+	Public Sub Update()	'tracks in-ball-velocity
+		dim str, b, allBalls, highestID :
+		allBalls = getballs
+
+		for each b in allballs
+			if b.id >= HighestID then highestID = b.id
+		Next
+
+		if uBound(ballvel) < highestID then redim ballvel(highestID)	'set bounds
+
+		for each b in allballs
+			ballvel(b.id) = BallSpeed(b)
+		Next
+	End Sub
+End Class
+
+'********Interpolates the value for areas between the low and upper bounds sent to it
+Function LinearEnvelope(xInput, xKeyFrame, yLvl)
+	dim y 'Y output
+	dim L 'Line
+	dim ii : for ii = 1 to uBound(xKeyFrame)	'find active line
+		if xInput <= xKeyFrame(ii) then L = ii : exit for : end if
+	Next
+	if xInput > xKeyFrame(uBound(xKeyFrame) ) then L = uBound(xKeyFrame)	'catch line overrun
+	Y = pSlope(xInput, xKeyFrame(L-1), yLvl(L-1), xKeyFrame(L), yLvl(L) )
+
+	'clamp 2.0
+	if xInput <= xKeyFrame(lBound(xKeyFrame) ) then Y = yLvl(lBound(xKeyFrame) ) 	'Clamp lower
+	if xInput >= xKeyFrame(uBound(xKeyFrame) ) then Y = yLvl(uBound(xKeyFrame) )	'Clamp upper
+
+	LinearEnvelope = Y
+End Function
+
+Sub Table1_Exit
+	If B2sOn Then controller.stop
+	saveHighScore
+End Sub
